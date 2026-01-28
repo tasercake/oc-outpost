@@ -732,7 +732,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 9. OpenCodeInstance Implementation
+- [x] 9. OpenCodeInstance Implementation
 
   **What to do**:
   - Create `src/orchestrator/instance.rs`

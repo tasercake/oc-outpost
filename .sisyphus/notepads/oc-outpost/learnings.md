@@ -652,3 +652,127 @@ PortPool will be used by:
 - Task 10: Orchestrator for port cleanup during shutdown
 - Task 11: Health checks to detect orphan processes
 
+
+## Task 9: OpenCodeInstance Implementation (2026-01-29)
+
+### Implementation Summary
+Successfully implemented OpenCodeInstance for OpenCode process lifecycle management:
+- **19 tests** passing (exceeds 12 minimum requirement)
+- Process spawning with `opencode serve --port PORT --project PATH`
+- Health check polling via `GET http://localhost:{port}/global/health`
+- Graceful shutdown (SIGTERM → 5s wait → SIGKILL)
+- State transition tracking: Starting → Running → Stopping → Stopped/Error
+- Crash detection via `Child::try_wait()`
+
+### Key Design Decisions
+
+1. **tokio::sync::Mutex over std::sync::Mutex**: Used tokio's Mutex for async-safe interior mutability since the instance is used in async contexts.
+
+2. **Separate Child and PID tracking**: Store both `Child` process handle and PID separately because:
+   - `Child::id()` may return None after process exits
+   - PID needed for sending SIGTERM via kill command
+   - Allows tracking external instances (no Child, but has PID)
+
+3. **External Instance Support**: Added `external()` constructor for discovered/registered instances that weren't spawned by us.
+
+4. **HTTP Client Reuse**: Store `reqwest::Client` in instance struct for efficient connection pooling across health checks.
+
+### Graceful Shutdown Pattern
+```rust
+// 1. Send SIGTERM via kill command
+std::process::Command::new("kill")
+    .arg("-TERM")
+    .arg(pid.to_string())
+    .output();
+
+// 2. Poll try_wait() with timeout
+tokio::time::timeout(GRACEFUL_SHUTDOWN_TIMEOUT, async {
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,  // Process exited
+            Ok(None) => tokio::time::sleep(Duration::from_millis(100)).await,
+            Err(_) => return false,
+        }
+    }
+}).await;
+
+// 3. Force kill if timeout
+child.kill().await;
+```
+
+**Why this approach:**
+- `Child::kill()` sends SIGKILL directly, no graceful shutdown
+- Using `kill -TERM` via command allows graceful shutdown
+- `try_wait()` polls without blocking, suitable for async loop
+
+### Test Patterns
+
+1. **Mock Instance for Integration Tests**: Instead of mocking opencode, spawn real processes (`sleep`, `sh`) for integration tests.
+
+2. **Unix-only Tests**: Use `#[cfg(unix)]` for process lifecycle tests since SIGTERM behavior is Unix-specific.
+
+3. **External Instance Tests**: Most unit tests use `external()` constructor to avoid spawning real processes.
+
+### API Surface
+
+```rust
+impl OpenCodeInstance {
+    // Constructors
+    pub async fn spawn(config, port) -> Result<Self>
+    pub fn external(config, port, pid) -> Result<Self>
+    
+    // Core operations
+    pub async fn health_check(&self) -> Result<bool>
+    pub async fn stop(&self) -> Result<()>
+    pub async fn check_for_crash(&self) -> Result<bool>
+    pub async fn wait_for_ready(&self, timeout, poll_interval) -> Result<bool>
+    
+    // Getters
+    pub fn port(&self) -> u16
+    pub fn project_path(&self) -> &str
+    pub fn id(&self) -> &str
+    pub async fn state(&self) -> InstanceState
+    pub async fn session_id(&self) -> Option<String>
+    pub async fn pid(&self) -> Option<u32>
+    
+    // Setters
+    pub async fn set_session_id(&self, session_id: Option<String>)
+    pub async fn set_state(&self, new_state: InstanceState)
+}
+```
+
+### Gotchas
+
+1. **Child::kill() is SIGKILL**: Unlike what the name suggests, `Child::kill()` sends SIGKILL, not SIGTERM. Must use separate kill command for graceful shutdown.
+
+2. **tokio Mutex deadlock**: Careful with holding multiple locks - dropped child_guard before acquiring state/pid locks to avoid deadlock.
+
+3. **Debug trait required**: `Result::unwrap_err()` requires `T: Debug`, so added `#[derive(Debug)]` to OpenCodeInstance.
+
+### Files Modified
+- `src/orchestrator/instance.rs` - New file with OpenCodeInstance implementation
+- `src/orchestrator/mod.rs` - Added `pub mod instance;`
+
+### Test Results
+```
+Summary [5.311s] 50 tests run: 50 passed, 105 skipped
+```
+
+19 instance-specific tests covering:
+- External instance creation and getters
+- State transitions
+- Health check (connection refused case)
+- Crash detection
+- Stop operations
+- Spawn error handling
+- Wait for ready timeout
+- Multiple concurrent instances
+- Real process spawn and stop (Unix)
+- Graceful SIGTERM shutdown (Unix)
+- Crash detection with real process (Unix)
+
+### Next Steps
+OpenCodeInstance will be used by:
+- Task 10: InstanceManager for managing multiple instances
+- Task 11: Health check loop
+- Task 12: Orchestrator for high-level coordination
