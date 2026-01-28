@@ -1721,3 +1721,55 @@ cargo clippy --bin oc-outpost                # No warnings for link module
 3. **Error Kind Matching**: Different IO errors need different user messages
 4. **Cross-platform Testing**: Avoid platform-specific permission tests, use symlinks instead
 5. **Lock Discipline**: Always drop locks before acquiring new ones in async code
+
+## Task 20: /stream Command Handler
+
+### Implementation Summary
+Implemented `/stream` command handler to toggle streaming preference in TopicStore.
+
+### Files Created/Modified
+- `src/bot/handlers/stream.rs` (new, ~260 lines with 7 tests)
+- `src/bot/handlers.rs` (added `pub mod stream;` and export, removed stub)
+
+### Handler Logic
+1. Extract topic_id from message (validate not General topic)
+2. Get topic mapping (error if no mapping found)
+3. Toggle streaming_enabled field via TopicStore::toggle_streaming()
+4. Send confirmation message with new state
+5. Handle errors: not in topic, no mapping
+
+### Confirmation Messages
+- **ON**: "Streaming: ON\nYou will see real-time progress from OpenCode."
+- **OFF**: "Streaming: OFF\nYou will only see final responses."
+
+### Test Coverage (7 tests)
+1. `test_cmd_stream_toggle_off_to_on` - Toggle from OFF to ON
+2. `test_cmd_stream_toggle_on_to_off` - Toggle from ON to OFF
+3. `test_cmd_stream_persistence_in_database` - Verify persistence across toggles
+4. `test_cmd_stream_error_no_mapping` - Error handling for missing mapping
+5. `test_cmd_stream_confirmation_message_on` - Verify ON message format
+6. `test_cmd_stream_confirmation_message_off` - Verify OFF message format
+7. `test_cmd_stream_multiple_toggles` - Multiple consecutive toggles
+
+### Verification
+```bash
+cargo nextest run -E 'test(cmd_stream)'  # 7/7 tests passing
+cargo clippy --all-targets               # No warnings for stream module
+```
+
+### Key Patterns Used
+1. **Topic Validation**: Reused get_topic_id pattern from disconnect/link handlers
+2. **Lock Discipline**: Drop locks immediately after use before acquiring new ones
+3. **Error Handling**: Use OutpostError for consistent error messages
+4. **Test Isolation**: Use tempfile for test databases, create_test_state helper
+5. **Boolean Assertions**: Use `assert!(value)` and `assert!(!value)` instead of `assert_eq!`
+
+### SSE Subscription (Stubbed)
+- Currently no-op (as per requirements)
+- Ready for integration with SSE client in future tasks
+- Toggle state persists in database for future SSE implementation
+
+### Next Steps
+- Integrate with bot dispatcher to wire /stream command
+- Implement actual SSE subscription/unsubscription when SSE client available
+- Consider streaming quality options in future enhancement

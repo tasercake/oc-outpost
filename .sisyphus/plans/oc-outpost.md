@@ -1309,7 +1309,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 20. Command: /stream
+- [x] 20. Command: /stream
 
   **What to do**:
   - Implement `/stream` command handler (topic-only)
