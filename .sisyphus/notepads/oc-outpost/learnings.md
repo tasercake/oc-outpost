@@ -2245,3 +2245,165 @@ Full suite: 319 tests run: 319 passed (2 leaky), 0 skipped
 cargo nextest run -E 'test(help)' --no-fail-fast  # 4/4 tests passing
 cargo nextest run --no-fail-fast                   # 319/319 tests passing
 ```
+
+## Task 26: HTTP API Server Implementation (2026-01-29)
+
+### Implementation Summary
+Successfully implemented HTTP API server with axum framework:
+- **10 tests** passing (all API tests)
+- 5 REST endpoints: health, register, unregister, status, instances
+- Optional API key authentication middleware
+- CORS support via tower-http
+- TDD approach: tests written first, implementation followed
+
+### Key Design Decisions
+
+1. **Axum 0.8 Syntax**: Used modern axum patterns
+   - Wildcard paths: `{*path}` not `*path` or `:path`
+   - Path extraction: `Path(path): Path<String>` captures everything after route
+   - Middleware: `middleware::from_fn_with_state()` for stateful middleware
+
+2. **State Management**: Arc<AppState> pattern
+   - `AppState` holds `OrchestratorStore` and `api_key`
+   - Cloned `OrchestratorStore` requires `#[derive(Clone)]` on struct
+   - SqlitePool is Clone-able, so store can be cloned safely
+
+3. **API Key Middleware**: Optional authentication
+   - Checks `Authorization: Bearer <key>` header
+   - If no API key configured, allows all requests
+   - Returns 401 Unauthorized for invalid/missing keys
+
+4. **CORS Layer**: Permissive CORS for localhost
+   - `CorsLayer::permissive()` allows all origins
+   - Applied via `.layer()` on router
+   - Headers verified in tests
+
+5. **Path Normalization**: Ensure leading slash
+   - Wildcard captures include leading `/` in axum 0.8
+   - Normalize by ensuring path starts with `/`
+   - Stored paths in DB have leading `/`
+
+### API Endpoints
+
+1. **GET /api/health**: Health check
+   - Returns 200 OK
+   - No authentication required (before middleware)
+
+2. **POST /api/register**: Register external instance
+   - Request: `{ projectPath, port, sessionId }`
+   - Creates InstanceInfo with type External
+   - Saves to OrchestratorStore
+   - Returns 201 Created with instance info
+
+3. **POST /api/unregister**: Unregister instance
+   - Request: `{ projectPath }`
+   - Finds instance by path
+   - Deletes from OrchestratorStore
+   - Returns 204 No Content
+
+4. **GET /api/status/{*path}**: Check registration status
+   - Path parameter: project path (e.g., `/test/project`)
+   - Returns `{ registered: bool, instance?: InstanceInfo }`
+   - 200 OK if found, 404 Not Found if not registered
+
+5. **GET /api/instances**: List external instances
+   - Returns `{ instances: [InstanceInfo] }`
+   - Filters only External type instances
+   - Returns 200 OK with array
+
+### Test Patterns
+
+1. **In-Memory Database**: Used `:memory:` for tests
+   - Avoids tempfile cleanup issues
+   - Fast test execution
+   - Isolated test state
+
+2. **Tower ServiceExt**: Used `oneshot()` for testing
+   - Requires `use tower::ServiceExt` import
+   - Consumes router, so create new app per test
+   - Returns response directly
+
+3. **Test Helper**: `create_test_app(api_key)`
+   - Creates store, state, and router
+   - Accepts optional API key for auth tests
+   - Reduces boilerplate
+
+4. **Request Building**: Axum http types
+   - `Request::builder().uri().method().header().body()`
+   - Body must be `axum::body::Body`
+   - Headers use `axum::http::header` constants
+
+### Dependencies Added
+
+- `tower = "0.5"` - For ServiceExt trait in tests
+- Already had: `axum = "0.8"`, `tower-http = { version = "0.6", features = ["cors"] }`
+
+### Gotchas Encountered
+
+1. **Path Parameter Syntax**: Axum 0.8 changed syntax
+   - Old: `/api/status/:path` or `/api/status/*path`
+   - New: `/api/status/{*path}`
+   - Error message: "Path segments must not start with `:` or `*`"
+
+2. **Middleware Signature**: No generic type parameter
+   - Old: `async fn middleware<B>(request: Request<B>, next: Next<B>)`
+   - New: `async fn middleware(request: Request<Body>, next: Next)`
+   - `Next` is not generic in axum 0.8
+
+3. **OrchestratorStore Clone**: Required for AppState
+   - Added `#[derive(Clone)]` to OrchestratorStore
+   - SqlitePool is Clone-able internally
+   - Enables Arc<AppState> pattern
+
+4. **Tower Import**: Not in Cargo.toml initially
+   - Added `tower = "0.5"` for ServiceExt trait
+   - Required for `app.oneshot()` in tests
+
+5. **Dead Code Warnings**: API not integrated yet
+   - Added `#[allow(dead_code)]` to types and functions
+   - Will be used when server is started in main
+
+### Test Coverage (10 tests)
+
+1. `test_health_endpoint` - Health check returns 200
+2. `test_register_instance` - Register creates instance
+3. `test_unregister_instance` - Unregister deletes instance
+4. `test_status_endpoint_found` - Status returns registered instance
+5. `test_status_endpoint_not_found` - Status returns 404 for missing
+6. `test_list_instances` - List returns external instances
+7. `test_api_key_required` - 401 without key when configured
+8. `test_api_key_valid` - 200 with correct key
+9. `test_api_key_invalid` - 401 with wrong key
+10. `test_cors_headers_present` - CORS headers in response
+
+### Files Created
+
+- `src/api/mod.rs` (500+ lines with tests)
+- Updated `src/main.rs` (added `mod api;`)
+- Updated `Cargo.toml` (added tower dependency)
+- Updated `src/orchestrator/store.rs` (added Clone derive)
+
+### Verification
+
+```bash
+cargo nextest run -E 'test(api)' --no-fail-fast  # 10/10 tests passing
+cargo nextest run --no-fail-fast                  # 329/329 tests passing
+cargo clippy --all-targets -- -D warnings         # No API warnings
+```
+
+### Next Steps
+
+API server ready for integration:
+- Task 27: Start API server in main with config
+- Task 28: Graceful shutdown handling
+- External instances can register via HTTP API
+- Health endpoint for monitoring
+
+### Patterns That Worked Well
+
+1. **TDD Approach**: Tests written first caught issues early
+2. **In-Memory Database**: Fast, isolated test execution
+3. **Tower ServiceExt**: Clean test pattern with oneshot()
+4. **Optional Middleware**: API key only checked if configured
+5. **Path Normalization**: Consistent leading slash handling
+

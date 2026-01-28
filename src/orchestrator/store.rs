@@ -8,6 +8,7 @@ use std::path::Path;
 #[cfg(test)]
 use crate::types::instance::InstanceType;
 
+#[derive(Clone)]
 pub struct OrchestratorStore {
     pool: SqlitePool,
 }

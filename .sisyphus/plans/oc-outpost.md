@@ -1627,7 +1627,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ### Wave 5: API & Integration
 
-- [ ] 26. HTTP API Server
+- [x] 26. HTTP API Server
 
   **What to do**:
   - Create `src/api/mod.rs` module
