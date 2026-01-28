@@ -204,7 +204,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ### Wave 1: Foundation
 
-- [ ] 1. Project Scaffolding & Rust Tooling
+- [x] 1. Project Scaffolding & Rust Tooling
 
   **What to do**:
   - Initialize Cargo project with `cargo init --name oc-outpost`
@@ -293,7 +293,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 2. Core Type Definitions
+- [x] 2. Core Type Definitions
 
   **What to do**:
   - Create `src/types/mod.rs` module structure
@@ -346,7 +346,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 3. Configuration Module
+- [x] 3. Configuration Module
 
   **What to do**:
   - Create `src/config.rs`
