@@ -1734,7 +1734,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 28. Main Entry Point & Graceful Shutdown
+- [x] 28. Main Entry Point & Graceful Shutdown
 
   **What to do**:
   - Implement `src/main.rs`
