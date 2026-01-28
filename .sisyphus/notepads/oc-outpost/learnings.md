@@ -314,3 +314,40 @@ These database functions will be used by:
 - Task 6: TopicStore implementation
 - Task 27: Integration layer
 
+
+## Task 5: OrchestratorStore Implementation (2026-01-29)
+
+### Implementation Approach
+- **TDD Workflow**: Wrote 21 comprehensive tests first, then implemented methods to pass them
+- **Database Layer**: Used sqlx runtime queries (no macros) with SqlitePool for connection pooling
+- **Schema Mapping**: Database schema has `session_id`, `created_at`, `updated_at` while InstanceInfo has `pid`, `started_at`, `stopped_at` - handled mapping in store layer
+
+### Key Design Decisions
+1. **save_instance() signature**: Added `session_id: Option<&str>` parameter since InstanceInfo doesn't have this field but DB does
+2. **Timestamp handling**: Store manages `created_at` and `updated_at` internally - preserves created_at on updates
+3. **INSERT OR REPLACE**: Used for upsert behavior, checks existing created_at before replacing
+4. **Connection pooling**: SqlitePool reused across all queries via `init_orchestrator_db()`
+
+### Test Coverage
+- CRUD operations: save, get, get_by_port, get_by_path, get_all, update_state, delete
+- Edge cases: not found, concurrent access, all instance types/states
+- Timestamp verification: created_at preserved, updated_at changes
+- Session ID handling: None values supported
+
+### Patterns Discovered
+- **Row mapping**: Manual conversion from SqliteRow to InstanceInfo in `row_to_instance()`
+- **Enum serialization**: Used serde_json for InstanceState/InstanceType storage as TEXT
+- **Conditional imports**: `#[cfg(test)]` for test-only imports (InstanceType)
+- **Test helpers**: `create_test_instance()` reduces boilerplate
+
+### Performance Notes
+- WAL mode enabled for concurrent access
+- Indexes on port, project_path, state for query performance
+- Connection pool prevents overhead of repeated connections
+- Concurrent test with 10 parallel saves completed successfully
+
+### Gotchas
+- InstanceInfo structure mismatch with task description - adapted to actual codebase
+- Clippy warnings for unused imports - used conditional compilation
+- Test ordering assumptions - used count assertions instead of index-based checks
+
