@@ -3,11 +3,7 @@ use crate::types::error::Result;
 use std::sync::Arc;
 use teloxide::prelude::*;
 
-#[allow(dead_code)]
-pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotState>) -> Result<()> {
-    let _ = (bot, msg, cmd, state);
-    Ok(())
-}
+pub mod new;
 
 #[allow(dead_code)]
 pub async fn handle_sessions(
@@ -104,7 +100,7 @@ mod tests {
 
     #[test]
     fn test_handler_signatures_compile() {
-        let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_new;
+        let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = new::handle_new;
         let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_sessions;
         let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_connect;
         let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_disconnect;

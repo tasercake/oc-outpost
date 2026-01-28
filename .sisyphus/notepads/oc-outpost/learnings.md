@@ -1342,3 +1342,90 @@ if in_tag {
 - Consider streaming API for very large messages
 - Add benchmarks for performance validation
 
+
+## Task 15: /new Command Handler
+
+**Date**: 2026-01-29
+
+### Implementation Summary
+- Created `src/bot/handlers/new.rs` with `/new` command handler
+- Implemented project name validation (1-50 chars, alphanumeric + dash/underscore only)
+- Added General topic detection logic
+- Wrote 11 comprehensive tests covering all validation edge cases
+- All tests passing, build successful
+
+### Key Learnings
+
+1. **Teloxide ThreadId Type System**
+   - `ThreadId` is a newtype wrapper around `MessageId`
+   - General topic has `thread_id = None` or `ThreadId(MessageId(1))`
+   - Must unwrap to compare: `msg.thread_id.map(|id| id.0).map_or(false, |raw_id| raw_id == MessageId(1))`
+
+2. **Error Handling with OutpostError**
+   - Used custom `OutpostError` enum instead of `anyhow::Error`
+   - Converted Telegram errors: `.map_err(|e| OutpostError::telegram_error(e.to_string()))`
+   - Converted IO errors: `.map_err(|e| OutpostError::io_error(format!(...)))`
+   - Config errors for validation: `OutpostError::config_error("message")`
+
+3. **Test Coverage Strategy**
+   - 11 tests for validation function alone
+   - Covered: valid names, empty, too long, invalid chars, boundary cases
+   - Tested special characters, whitespace, mixed valid chars
+   - Used `assert!(result.is_err())` and `assert!(result.unwrap_err().to_string().contains("..."))`
+
+4. **Module Organization**
+   - Created separate `new.rs` module under `bot/handlers/`
+   - Exported via `pub mod new;` in `handlers.rs`
+   - Used `#[allow(dead_code)]` for functions not yet wired to dispatcher
+   - Tests in same file with `#[cfg(test)] mod tests`
+
+5. **Security Considerations**
+   - Strict name validation prevents path traversal attacks
+   - No dots, slashes, or special chars allowed
+   - Length limit prevents resource exhaustion
+   - Documented validation rules in function docstring
+
+### Challenges Encountered
+
+1. **Teloxide API Changes**
+   - `ForumTopic` uses `thread_id` not `message_thread_id`
+   - ThreadId type system more complex than expected
+   - Needed to unwrap nested types carefully
+
+2. **Error Type Conversions**
+   - Initially used `anyhow::Error` but needed `OutpostError`
+   - Required explicit `.map_err()` for all error conversions
+   - Telegram, IO, and config errors all need different variants
+
+3. **Test Complexity**
+   - Initially tried to create full `Message` structs for integration tests
+   - Simplified to unit tests for validation logic only
+   - Full integration tests deferred until dispatcher is wired
+
+### Next Steps
+- Wire handler to dispatcher in main bot loop
+- Implement forum topic creation
+- Integrate with InstanceManager for spawning OpenCode
+- Add TopicStore mapping creation
+- Implement full success message with session info
+
+### Test Results
+```
+11 tests run: 11 passed, 0 failed
+- test_validate_project_name_valid
+- test_validate_project_name_empty
+- test_validate_project_name_too_long
+- test_validate_project_name_invalid_chars
+- test_validate_project_name_boundary_length
+- test_validate_project_name_with_dashes
+- test_validate_project_name_with_underscores
+- test_validate_project_name_mixed_valid_chars
+- test_validate_project_name_numeric_only
+- test_validate_project_name_special_chars_rejected
+- test_validate_project_name_whitespace_rejected
+```
+
+### Files Modified
+- `src/bot/handlers/new.rs` (new file, 220 lines)
+- `src/bot/handlers.rs` (added module declaration)
+

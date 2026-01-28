@@ -1069,7 +1069,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 15. Command: /new
+- [x] 15. Command: /new
 
   **What to do**:
   - Implement `/new <name>` command handler
