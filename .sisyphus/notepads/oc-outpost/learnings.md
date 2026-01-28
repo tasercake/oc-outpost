@@ -2514,3 +2514,123 @@ This handler will be used by:
 cargo nextest run -E 'test(permission)'  # 11/11 tests passing (7 new + 4 existing)
 cargo nextest run --no-fail-fast         # 336/336 tests passing
 ```
+
+## Task 27: Integration Layer Implementation (2026-01-29)
+
+### Implementation Summary
+Successfully implemented the Integration Layer that wires all components together:
+- **19 tests** passing
+- Message routing from Telegram to OpenCode
+- Stream bridging from OpenCode to Telegram with SSE events
+- Topic name auto-update after first response
+- Rate limiting for Telegram API (2-second batching)
+- External instance routing support
+
+### Key Design Decisions
+
+1. **Integration Struct Pattern**:
+   ```rust
+   pub struct Integration {
+       state: Arc<BotState>,
+       stream_handler: Arc<StreamHandler>,
+       rate_limiters: Arc<RwLock<HashMap<i32, RateLimitState>>>,
+       active_streams: Arc<Mutex<HashMap<i32, JoinHandle<()>>>>,
+   }
+   ```
+   - `Arc<BotState>` for shared state across async tasks
+   - `Arc<StreamHandler>` for SSE subscriptions
+   - `RwLock` for rate limiters (read-heavy access pattern)
+   - `Mutex` for active streams (write-heavy access pattern)
+
+2. **Message Routing Flow**:
+   1. Extract text from Telegram message
+   2. Get topic_id from thread_id
+   3. Look up TopicMapping from TopicStore
+   4. Get instance port from mapping or OrchestratorStore
+   5. Mark message as from Telegram (for deduplication)
+   6. Send async to OpenCode via REST client
+   7. Subscribe to SSE if streaming enabled
+
+3. **Rate Limiting Strategy**:
+   - 2-second batching interval for text chunks
+   - Flush on tool/message events
+   - Per-topic rate limiter state
+   - 4096 character max message length (Telegram limit)
+
+4. **Topic Name Auto-Update**:
+   - Triggers on first `MessageComplete` or `SessionIdle` event
+   - Extracts project name from path using `Path::file_name()`
+   - Updates via `bot.edit_forum_topic()` API
+   - Marks as updated in TopicStore to prevent re-updates
+
+5. **Stream Event Handling**:
+   - Text chunks batched with throttling
+   - Tool invocations sent immediately with args pretty-printed
+   - Tool results truncated to 500 chars
+   - Permission requests delegated to permission handler
+   - Disconnected/Reconnected events logged
+
+### Patterns That Worked Well
+
+1. **TDD Approach**: Tests written first, implementation to pass
+2. **RwLock for Read-Heavy State**: Rate limiters accessed frequently for reads
+3. **Spawned Stream Forwarder**: Independent task per topic for stream handling
+4. **Graceful Cleanup**: Active streams tracked and aborted on shutdown
+
+### API Surface
+
+```rust
+impl Integration {
+    pub fn new(state: Arc<BotState>, stream_handler: Arc<StreamHandler>) -> Self
+    pub async fn handle_message(&self, bot: Bot, msg: Message) -> Result<()>
+    pub async fn stop_stream(&self, topic_id: i32)
+    pub async fn stop_all_streams(&self)
+    pub async fn active_stream_count(&self) -> usize
+}
+```
+
+### Test Coverage (19 tests)
+
+1. `test_integration_new` - Constructor
+2. `test_route_message_no_mapping` - Unmapped topic ignored
+3. `test_route_message_with_mapping` - Mapped topic processed
+4. `test_route_message_to_managed_instance` - Managed instance routing
+5. `test_route_message_to_discovered_instance` - Discovered instance routing
+6. `test_route_message_to_external_instance` - External instance routing
+7. `test_get_instance_port_fallback` - Port resolution fallback
+8. `test_active_stream_count` - Stream counting
+9. `test_rate_limiter_state_default` - Rate limiter defaults
+10. `test_stream_event_throttling` - Text batching
+11. `test_topic_name_extraction` - Project name extraction
+12. `test_stop_stream_when_none_active` - Safe stream stop
+13. `test_stop_all_streams_when_empty` - Safe shutdown
+14. `test_mapping_streaming_enabled` - Mapping field access
+15. `test_mapping_without_session` - Missing session handling
+16. `test_concurrent_rate_limiter_access` - Thread safety
+17. `test_telegram_message_length_constant` - Constant verification
+18. `test_batch_interval_constant` - Constant verification
+19. `test_permission_event_handling` - Permission event structure
+
+### Gotchas Encountered
+
+1. **Module Visibility**: `bot::handlers::permissions` was private; used `bot::handle_permission_request` re-export instead
+2. **ThreadId Extraction**: `msg.thread_id.0.0` to get i32 from `ThreadId(MessageId(i32))`
+3. **TopicStore uses i32**: Topic ID is i32, not i64
+4. **Unused imports warning**: Removed `error` from tracing imports since it wasn't used
+
+### Files Created/Modified
+- `src/integration.rs` (new, ~800 lines with tests)
+- `src/main.rs` (added `mod integration;`)
+
+### Verification
+```bash
+cargo nextest run -E 'test(integration)'  # 19/19 tests passing
+cargo nextest run --no-fail-fast          # 355/355 tests passing
+cargo check                               # Compiles with warnings only
+```
+
+### Next Steps
+Integration module will be used by:
+- Task 28: Main entry point wiring everything together
+- Bot message handler registration
+- Graceful shutdown coordination

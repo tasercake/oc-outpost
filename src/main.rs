@@ -3,6 +3,7 @@ mod bot;
 mod config;
 mod db;
 mod forum;
+mod integration;
 mod opencode;
 mod orchestrator;
 mod telegram;

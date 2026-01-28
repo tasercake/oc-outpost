@@ -1682,7 +1682,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 27. Integration Layer
+- [x] 27. Integration Layer
 
   **What to do**:
   - Create `src/integration.rs`
