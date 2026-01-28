@@ -351,3 +351,40 @@ These database functions will be used by:
 - Clippy warnings for unused imports - used conditional compilation
 - Test ordering assumptions - used count assertions instead of index-based checks
 
+
+## TopicStore Implementation (Task 6)
+
+### TDD Approach Success
+- Wrote 20 comprehensive tests covering all CRUD operations and edge cases
+- Tests verified: persistence across reconnects, boolean handling, stale mapping queries
+- All tests passed on first implementation run after fixing Row trait import
+
+### SQLite Runtime Queries Pattern
+- Used `sqlx::query()` with runtime binding (not compile-time macros)
+- Required `use sqlx::Row` trait for `.get()` method on SqliteRow
+- Boolean fields stored as INTEGER (0/1) and converted with `row.get::<i32, _>(idx) != 0`
+- Used `ON CONFLICT(topic_id) DO UPDATE SET` for upsert pattern in save_mapping()
+
+### Key Implementation Details
+- `toggle_streaming()`: Read current value, flip it, save, return new value
+- `update_session()`, `mark_topic_name_updated()`: Check rows_affected() to error on missing mapping
+- `delete_mapping()`: No error on missing mapping (idempotent)
+- `get_stale_mappings()`: Calculate threshold as `now - duration.as_secs()` for timestamp comparison
+- All update operations set `updated_at` to current timestamp
+
+### Test Patterns
+- Used `TempDir` for isolated test databases
+- Helper function `create_test_mapping()` for consistent test data
+- Tests verify both success and error cases (e.g., nonexistent mappings)
+- Persistence test uses scoped blocks to drop first connection before second
+
+### Module Structure
+- `src/forum/mod.rs`: Module root with `pub use store::TopicStore`
+- `src/forum/store.rs`: Implementation with 10 methods + 20 tests
+- Added `mod forum` to `src/main.rs` to include in build
+
+### Performance Notes
+- Schema already has indexes on chat_id, session_id, instance_id (from migration)
+- No additional indexes needed for current query patterns
+- WAL mode enabled by `init_topics_db()` for better concurrency
+

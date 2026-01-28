@@ -1,5 +1,6 @@
 mod config;
 mod db;
+mod forum;
 mod orchestrator;
 mod types;
 

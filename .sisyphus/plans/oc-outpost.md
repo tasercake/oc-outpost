@@ -553,7 +553,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 6. TopicStore Implementation
+- [x] 6. TopicStore Implementation
 
   **What to do**:
   - Create `src/forum/store.rs`
