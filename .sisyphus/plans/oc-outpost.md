@@ -1019,7 +1019,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 14. Telegram Markdown Converter
+- [x] 14. Telegram Markdown Converter
 
   **What to do**:
   - Create `src/telegram/markdown.rs`

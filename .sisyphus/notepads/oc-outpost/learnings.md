@@ -1218,3 +1218,127 @@ StreamHandler will be used by:
 - Task 14: Message formatting for Telegram display
 - Task 27: Integration layer connecting bot to OpenCode
 - Task 28: Main entry point with SSE subscription on session start
+
+## Task 14: Telegram Markdown Converter
+
+**Date**: 2026-01-29
+
+### Implementation Summary
+Created a Markdown to Telegram HTML converter with comprehensive test coverage (20 tests).
+
+### Key Components
+1. **markdown_to_telegram_html()**: Converts Markdown to Telegram HTML format
+   - Bold: `**text**` or `__text__` → `<b>text</b>`
+   - Italic: `*text*` or `_text_` → `<i>text</i>`
+   - Inline code: `` `code` `` → `<code>code</code>`
+   - Code blocks: ` ```lang\ncode\n``` ` → `<pre><code class="language-lang">code</code></pre>`
+   - Links: `[text](url)` → `<a href="url">text</a>`
+   - Recursive processing for nested formatting
+
+2. **truncate_message()**: Truncates messages to max length
+   - Adds "..." if truncated
+   - Avoids breaking inside HTML tags
+   - Safe backtracking to tag boundaries
+
+3. **split_message()**: Splits long messages into chunks
+   - Preserves code block integrity
+   - Avoids breaking inside HTML tags
+   - Adds "..." between parts
+   - Respects Telegram's 4096 char limit
+
+### Technical Challenges & Solutions
+
+#### 1. Parser State Machine
+**Challenge**: Implementing a character-by-character parser with multiple overlapping patterns (bold, italic, code, links).
+
+**Solution**: Priority-based parsing order:
+1. Code blocks first (highest priority, no nested formatting)
+2. Inline code
+3. Bold (double markers)
+4. Italic (single markers)
+5. Links
+6. Regular characters with HTML escaping
+
+#### 2. Unclosed Markdown Handling
+**Challenge**: Handling malformed Markdown like `**bold` (no closing marker).
+
+**Solution**: 
+- Changed loop condition from `while i + 1 < chars.len()` to `while i < chars.len()`
+- Added bounds check before accessing `chars[i + 1]`
+- Parser gracefully handles EOF by closing tags automatically
+
+**Bug Fix**: Initial implementation consumed characters incorrectly, producing `<b>bol</b>d` instead of `<b>bold</b>`.
+
+#### 3. Incomplete Link Handling
+**Challenge**: Distinguishing between `[text]` (not a link) and `[text` (incomplete).
+
+**Solution**: Track whether closing bracket was found:
+```rust
+let mut found_closing_bracket = false;
+// ... parse ...
+if found_closing_bracket {
+    result.push(']');
+}
+```
+
+#### 4. HTML Tag Boundary Detection
+**Challenge**: Truncating/splitting without breaking inside HTML tags like `<b>`.
+
+**Solution**: Track tag state while scanning:
+```rust
+let mut in_tag = false;
+for &ch in chars.iter() {
+    if ch == '<' { in_tag = true; }
+    else if ch == '>' { in_tag = false; }
+}
+if in_tag {
+    // Backtrack to before the tag
+}
+```
+
+#### 5. Clippy Warnings
+**Challenge**: `needless_range_loop` warnings for indexed loops.
+
+**Solution**: Replaced `for i in 0..len` with `chars.iter().enumerate()` or `chars.iter().skip(start).take(count)`.
+
+### Test Coverage (20 tests)
+- Basic formatting: bold, italic, inline code, code blocks, links
+- Nested formatting: bold with italic inside
+- HTML entity escaping: `<`, `>`, `&`
+- Truncation: short, long, at tag boundary
+- Splitting: short, long, with code blocks, Telegram limit
+- Edge cases: empty string, whitespace only, malformed Markdown
+- Multiple code blocks in one message
+- Mixed formatting
+
+### Performance Considerations
+- Single-pass parsing (O(n) time complexity)
+- Pre-allocated result string with `String::with_capacity(text.len())`
+- Character vector for efficient indexing: `chars: Vec<char> = text.chars().collect()`
+- Recursive processing for nested formatting (limited depth in practice)
+
+### Telegram HTML Constraints
+- Max message length: 4096 characters
+- Supported tags: `<b>`, `<i>`, `<code>`, `<pre>`, `<a href="">`
+- Code blocks: `<pre><code class="language-X">` for syntax highlighting
+- HTML entities must be escaped: `&lt;`, `&gt;`, `&amp;`
+
+### Integration Notes
+- Module structure: `src/telegram/mod.rs` → `src/telegram/markdown.rs`
+- Public API: 3 functions (markdown_to_telegram_html, truncate_message, split_message)
+- No external dependencies (pure Rust implementation)
+- Ready for integration with bot message sending
+
+### Lessons Learned
+1. **Parser Design**: Priority-based pattern matching prevents ambiguity
+2. **Bounds Checking**: Always check `i + 1 < len` before accessing `chars[i + 1]`
+3. **State Tracking**: Boolean flags (in_tag, found_closing_bracket) simplify complex logic
+4. **Test-Driven Development**: Writing tests first caught edge cases early
+5. **Clippy Compliance**: Iterator methods are more idiomatic than indexed loops
+
+### Next Steps
+- Integrate with bot message sending (Task 15+)
+- Add support for strikethrough, underline if needed
+- Consider streaming API for very large messages
+- Add benchmarks for performance validation
+
