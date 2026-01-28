@@ -233,3 +233,84 @@ These types will be used by:
 - Orchestrator (Task 5) for instance management
 - Bot handlers (Task 6) for Telegram integration
 - API server (Task 7) for external instance registration
+# Database Implementation Learnings
+
+## Task 4: Database Schemas and Migration System
+
+### Implementation Date
+2026-01-29
+
+### What Was Done
+- Created SQLite database schemas for orchestrator.db and topics.db
+- Implemented migration system using sqlx runtime queries (no macros)
+- Used TDD approach: RED (failing tests) → GREEN (implementation) → REFACTOR (cleanup)
+- Created 11 comprehensive tests covering:
+  - Database creation
+  - Table schema validation
+  - Index creation
+  - Migration idempotency
+  - WAL mode enablement
+  - Default values
+
+### Key Decisions
+1. **Runtime Queries Over Macros**: Used `sqlx::query()` with `include_str!()` instead of compile-time macros to avoid DATABASE_URL requirement
+2. **WAL Mode**: Enabled Write-Ahead Logging for better concurrency
+3. **Embedded Migrations**: Used `include_str!()` to embed SQL files in binary
+4. **Simple Migration Runner**: No versioning system - just idempotent CREATE TABLE IF NOT EXISTS
+
+### Schema Design
+- **instances table**: Tracks managed OpenCode instances with state, port, project_path
+- **topic_mappings table**: Maps Telegram topics to OpenCode sessions with streaming preferences
+- Both use INTEGER for timestamps (Unix epoch seconds)
+- Both use INTEGER for booleans (SQLite convention: 1=true, 0=false)
+
+### Testing Approach
+- Used tempfile crate for isolated test databases
+- Verified idempotency by running migrations twice
+- Tested schema by querying column names
+- Tested indexes by querying sqlite_master
+- Tested defaults by inserting minimal records
+
+### Performance Considerations
+- Added indexes on frequently queried columns:
+  - instances: port, project_path, state
+  - topic_mappings: chat_id, session_id, instance_id
+- WAL mode improves concurrent read/write performance
+
+### Patterns That Worked Well
+1. TDD workflow caught issues early (e.g., chrono dependency)
+2. Comprehensive tests give confidence for refactoring
+3. SQL comments in migration files document schema intent
+4. `include_str!()` keeps SQL separate but embedded
+
+### Gotchas Avoided
+- Used std::time instead of chrono to avoid extra dependency
+- Used `?mode=rwc` in connection string to create DB if not exists
+- Closed pools in tests to avoid file locks
+- Used IF NOT EXISTS for true idempotency
+
+### Files Created
+- `src/db/mod.rs` - Database module with init functions
+- `migrations/001_create_instances_table.sql` - Orchestrator schema
+- `migrations/002_create_topic_mappings_table.sql` - Topics schema
+
+### Test Results
+All 11 tests passing:
+- test_init_orchestrator_db_creates_database
+- test_init_orchestrator_db_creates_instances_table
+- test_init_orchestrator_db_creates_indexes
+- test_init_orchestrator_db_is_idempotent
+- test_init_orchestrator_db_enables_wal_mode
+- test_init_topics_db_creates_database
+- test_init_topics_db_creates_topic_mappings_table
+- test_init_topics_db_creates_indexes
+- test_init_topics_db_is_idempotent
+- test_init_topics_db_enables_wal_mode
+- test_init_topics_db_default_values
+
+### Next Steps
+These database functions will be used by:
+- Task 5: OrchestratorStore implementation
+- Task 6: TopicStore implementation
+- Task 27: Integration layer
+

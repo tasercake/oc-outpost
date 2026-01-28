@@ -427,7 +427,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ### Wave 2: Storage & Framework
 
-- [ ] 4. Database Schemas & Migrations
+- [x] 4. Database Schemas & Migrations
 
   **What to do**:
   - Create `src/db/mod.rs` module
