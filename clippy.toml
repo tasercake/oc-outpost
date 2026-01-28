@@ -1,0 +1,4 @@
+# Clippy lint configuration
+too-many-arguments-threshold = 8
+type-complexity-threshold = 500
+single-char-binding-names-threshold = 5

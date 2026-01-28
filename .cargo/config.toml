@@ -1,0 +1,6 @@
+[build]
+jobs = 4
+
+[term]
+color = "auto"
+verbose = false
