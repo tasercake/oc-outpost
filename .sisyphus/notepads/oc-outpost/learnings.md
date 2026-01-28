@@ -1485,3 +1485,69 @@ cargo clippy --all-targets             # No warnings in sessions.rs
 ### Next Steps
 - Task 17: Implement session_id retrieval in OrchestratorStore if needed
 - Consider adding filtering options (by state, by type) in future iterations
+
+## Task 17: /connect Command Handler
+
+**Date**: 2026-01-29
+
+### Implementation Summary
+Implemented `/connect <name>` command handler that searches for OpenCode sessions across managed and discovered instances, creates forum topics, and establishes topic mappings.
+
+### Key Learnings
+
+1. **Error Type Conversion**: The project uses custom `OutpostError` type instead of `anyhow::Error`. All external errors must be mapped using `.map_err(|e| OutpostError::variant(e.to_string()))`.
+
+2. **Teloxide Forum Topics**: 
+   - `Bot::create_forum_topic()` returns `ForumTopic` struct
+   - Thread ID is accessed via `forum_topic.thread_id.0.0` (nested tuple unwrapping)
+   - Field is `thread_id`, not `message_thread_id`
+
+3. **Discovery Module**: Already exported publicly in `src/opencode/mod.rs`, can be imported as `crate::opencode::Discovery`.
+
+4. **Session Search Pattern**:
+   - Search managed instances first (from OrchestratorStore)
+   - Then search discovered instances (from Discovery::discover_all())
+   - Extract project name from path using `PathBuf::file_name()`
+   - Match by both project name and instance ID
+
+5. **Dead Code Warnings**: Functions not yet wired into dispatcher need `#[allow(dead_code)]` attribute to pass clippy.
+
+6. **Test Strategy**:
+   - 11 unit tests covering search logic, error cases, and data structures
+   - Tests pass without mocking (Discovery::get_session_info returns None for non-existent ports)
+   - Used `#[tokio::test]` for async test functions
+
+### Technical Decisions
+
+1. **SessionInfo Struct**: Created internal struct to hold search results before creating topic mapping.
+
+2. **Error Handling**: Wrapped all external errors (database, telegram, IO) in OutpostError variants for consistent error handling.
+
+3. **Topic Naming**: Use project name directly as topic name (simple, clear).
+
+4. **Already Connected Check**: Iterate through existing mappings to prevent duplicate connections to same session.
+
+### Challenges Encountered
+
+1. **Type Mismatches**: Initial confusion with `ForumTopic.thread_id` type (ThreadId wrapping MessageId).
+   - Solution: Double unwrap `.thread_id.0.0` to get i32
+
+2. **Error Conversion**: Had to convert all `anyhow::Error` to `OutpostError`.
+   - Solution: Systematic `.map_err()` calls with appropriate OutpostError variants
+
+3. **Module Visibility**: Initially tried to import `discovery` as private module.
+   - Solution: Use public export `crate::opencode::Discovery`
+
+### Code Quality
+
+- **Tests**: 14 tests passing (11 new + 3 existing related tests)
+- **Clippy**: Clean, no warnings for connect.rs
+- **Coverage**: Search logic, error cases, data structures, edge cases
+
+### Next Steps
+
+- Wire handler into dispatcher (Task 18+)
+- Implement SSE subscription integration
+- Add session filtering options (future enhancement)
+- Mock Discovery::get_session_info for more robust testing
+

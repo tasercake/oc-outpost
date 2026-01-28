@@ -1177,7 +1177,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 17. Command: /connect
+- [x] 17. Command: /connect
 
   **What to do**:
   - Implement `/connect <name>` command handler

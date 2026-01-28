@@ -3,21 +3,14 @@ use crate::types::error::Result;
 use std::sync::Arc;
 use teloxide::prelude::*;
 
+pub mod connect;
 pub mod new;
 pub mod sessions;
 
+#[allow(unused_imports)]
+pub use connect::handle_connect;
+#[allow(unused_imports)]
 pub use sessions::handle_sessions;
-
-#[allow(dead_code)]
-pub async fn handle_connect(
-    bot: Bot,
-    msg: Message,
-    cmd: Command,
-    state: Arc<BotState>,
-) -> Result<()> {
-    let _ = (bot, msg, cmd, state);
-    Ok(())
-}
 
 #[allow(dead_code)]
 pub async fn handle_disconnect(
