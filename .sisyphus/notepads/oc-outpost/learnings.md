@@ -1618,3 +1618,106 @@ Implemented `/connect <name>` command handler that searches for OpenCode session
 - Implement SSE unsubscribe when SSE integration is ready
 - Add confirmation prompts if needed (currently immediate action)
 
+
+## Task 19: /link Command Handler (2026-01-29)
+
+### Implementation Summary
+Successfully implemented `/link` command handler for linking forum topics to project directories:
+- **8 tests** passing (exceeds 6 minimum requirement)
+- Path validation (exists, is directory, absolute path resolution)
+- ~ expansion using shellexpand crate
+- Relative path resolution via canonicalize()
+- Topic mapping update with timestamp
+- Confirmation message to user
+- Error handling for all edge cases
+
+### Key Design Decisions
+
+1. **Path Validation Function**: Extracted into separate `validate_path()` function
+   - Expands ~ using `shellexpand::tilde()`
+   - Resolves to absolute path with `canonicalize()`
+   - Validates directory with `metadata.is_dir()`
+   - Maps IO errors to user-friendly messages
+
+2. **Topic Validation**: Reused pattern from disconnect handler
+   - Extract topic_id from `msg.thread_id`
+   - Reject General topic (ThreadId(MessageId(1)))
+   - Return clear error if not in topic
+
+3. **Mapping Update Pattern**:
+   - Get existing mapping (must exist)
+   - Update project_path field
+   - Update timestamp to current time
+   - Save back to database
+
+4. **Error Handling Strategy**:
+   - Path not found → "Path not found: {path}"
+   - Not a directory → "Path is not a directory: {path}"
+   - Permission denied → "Permission denied: {path}"
+   - No mapping → "No active connection in this topic"
+   - Not in topic → "This command must be used in a forum topic"
+
+### Test Coverage (8 tests)
+
+1. `test_validate_path_exists` - Valid directory path
+2. `test_validate_path_not_found` - Non-existent path error
+3. `test_validate_path_not_directory` - File path error
+4. `test_expand_tilde` - ~ expansion to home directory
+5. `test_resolve_relative_path` - Relative path to absolute
+6. `test_validate_path_with_symlink` - Symlink handling
+7. `test_validate_path_absolute_path` - Absolute path verification
+8. `test_update_mapping` - Database update verification
+
+### Patterns That Worked Well
+
+1. **Separate Validation Function**: Makes testing easier, reusable logic
+2. **Error Kind Matching**: Use `e.kind()` to distinguish error types
+3. **Timestamp Management**: Use `SystemTime::now()` for current time
+4. **Lock Management**: Drop locks before acquiring new ones (prevent deadlock)
+5. **Test Isolation**: Use TempDir for isolated test directories
+
+### Gotchas Encountered
+
+1. **dirs crate not in dependencies**: Had to add `cargo add dirs` for home directory
+2. **Permission test platform-specific**: macOS doesn't enforce 0o000 permissions for owner
+   - Solution: Replaced with symlink test (works cross-platform)
+3. **Clippy useless_conversion**: Removed unnecessary `.into()` on error return
+4. **Unused import warning**: Removed unused `std::path::Path` import
+
+### API Surface
+
+```rust
+pub async fn handle_link(
+    bot: Bot,
+    msg: Message,
+    cmd: Command,
+    state: Arc<BotState>,
+) -> Result<()>
+
+fn validate_path(path: &str) -> Result<PathBuf>
+fn get_topic_id(msg: &Message) -> Result<i32>
+```
+
+### Files Created/Modified
+- `src/bot/handlers/link.rs` (new, ~270 lines with tests)
+- `src/bot/handlers.rs` (added `pub mod link;` and export)
+- `Cargo.toml` (added `dirs` dependency)
+
+### Verification
+```bash
+cargo nextest run -E 'test(handlers::link)'  # 8/8 tests passing
+cargo clippy --bin oc-outpost                # No warnings for link module
+```
+
+### Next Steps
+- Link handler ready for integration with bot dispatcher
+- Can be used to change project path for existing topic connections
+- Enables users to switch between different project directories
+
+### Key Learnings
+
+1. **Path Canonicalization**: `canonicalize()` resolves symlinks and relative paths to absolute
+2. **shellexpand Pattern**: Use `.into_owned()` to convert Cow<str> to String
+3. **Error Kind Matching**: Different IO errors need different user messages
+4. **Cross-platform Testing**: Avoid platform-specific permission tests, use symlinks instead
+5. **Lock Discipline**: Always drop locks before acquiring new ones in async code

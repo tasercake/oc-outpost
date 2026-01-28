@@ -1264,7 +1264,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 19. Command: /link
+- [x] 19. Command: /link
 
   **What to do**:
   - Implement `/link <path>` command handler (topic-only)
