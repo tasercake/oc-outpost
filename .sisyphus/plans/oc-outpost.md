@@ -900,7 +900,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 12. OpenCode REST Client
+- [x] 12. OpenCode REST Client
 
   **What to do**:
   - Create `src/opencode/client.rs`

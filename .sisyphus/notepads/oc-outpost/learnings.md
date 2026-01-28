@@ -1001,3 +1001,83 @@ This module will be used by:
 - Task 12: Auto-registration of discovered instances
 - Task 27: Integration layer for instance management
 - InstanceManager for handling external/discovered instances
+
+## Task 12: OpenCode REST Client
+
+**Completed:** 2026-01-29
+
+### Implementation Summary
+- Created `src/opencode/client.rs` with full REST API wrapper
+- Implemented all 9 required methods using reqwest async HTTP client
+- Added comprehensive test suite with 16 tests using wiremock mock server
+- All tests passing, no clippy warnings for client module
+
+### Key Decisions
+1. **HTTP Client**: Used `reqwest::Client` for async HTTP requests
+2. **Error Handling**: Used `anyhow::Result` with context for clear error messages
+3. **Message Structure**: Wrapped text in proper `Message` struct with `MessagePart::Text`
+4. **Mock Testing**: Used `wiremock` for HTTP mocking instead of manual test servers
+5. **Internal Structs**: Marked serialization-only structs with `#[allow(dead_code)]`
+
+### API Methods Implemented
+1. `new(base_url)` - Initialize client with base URL
+2. `health()` - Check server health (GET /global/health)
+3. `list_sessions()` - List all sessions (GET /sessions)
+4. `get_session(id)` - Get session by ID (GET /session/:id)
+5. `create_session(project_path)` - Create new session (POST /session)
+6. `send_message(session_id, text)` - Send message sync (POST /session/:id/prompt)
+7. `send_message_async(session_id, text)` - Send message async (POST /session/:id/prompt_async)
+8. `sse_url(session_id)` - Generate SSE URL (format: {base_url}/session/{id}/stream)
+9. `reply_permission(session_id, permission_id, allow)` - Reply to permission (POST /session/:id/permission/:permission_id/reply)
+
+### Test Coverage (16 tests)
+- Client construction and URL trimming
+- Health check (success/failure)
+- List sessions (empty/multiple)
+- Get session (found/not found)
+- Create session
+- Send message (sync/async)
+- SSE URL generation
+- Permission reply (allow/deny)
+- HTTP error handling (500)
+- Invalid JSON response handling
+
+### Technical Details
+- **Base URL Handling**: Trims trailing slashes for consistency
+- **HTTP Status Codes**: Properly handles 200, 202, 404, 500
+- **JSON Serialization**: Uses serde for request/response bodies
+- **Error Context**: Adds context to all HTTP errors for debugging
+- **Message Format**: Converts simple text to full Message structure with MessagePart enum
+
+### Dependencies Added
+- `wiremock = "0.6"` (dev-dependency) - HTTP mocking for tests
+
+### Patterns Learned
+1. **Wiremock Pattern**: Mock server setup with `MockServer::start().await`
+2. **Path Matchers**: Use `path()` for exact matches, `path_regex()` for patterns
+3. **Response Templates**: `ResponseTemplate::new(status).set_body_json(json!({...}))`
+4. **Async Testing**: All tests use `#[tokio::test]` for async execution
+5. **URL Construction**: Use `format!()` for building REST endpoints
+
+### Gotchas Encountered
+1. **Import Paths**: Had to use `crate::types::opencode::*` not `crate::types::*`
+2. **Message Structure**: OpenCode expects full Message object, not just text string
+3. **Dead Code Warnings**: Internal serialization structs need `#[allow(dead_code)]`
+4. **Binary Crate**: Can't use `cargo clippy --lib` since this is a binary project
+
+### Next Steps
+- Client ready for integration with StreamHandler (Task 13)
+- Can be used by Orchestrator for instance management
+- SSE URL generation enables streaming message handling
+
+### Files Modified
+- `src/opencode/client.rs` (new, 545 lines)
+- `src/opencode/mod.rs` (added client module export)
+- `Cargo.toml` (added wiremock dev-dependency)
+
+### Verification
+```bash
+cargo nextest run -E 'test(client)'  # 16/16 tests passing
+cargo build --tests                   # No warnings for client module
+```
+
