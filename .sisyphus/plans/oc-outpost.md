@@ -786,7 +786,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 10. InstanceManager Implementation
+- [x] 10. InstanceManager Implementation
 
   **What to do**:
   - Create `src/orchestrator/manager.rs`

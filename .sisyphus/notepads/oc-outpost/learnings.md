@@ -776,3 +776,111 @@ OpenCodeInstance will be used by:
 - Task 10: InstanceManager for managing multiple instances
 - Task 11: Health check loop
 - Task 12: Orchestrator for high-level coordination
+
+## Task 10: InstanceManager Implementation (2026-01-29)
+
+### Implementation Summary
+Successfully implemented InstanceManager for coordinating OpenCode instance lifecycle:
+- **16 tests** passing (exceeds 15 minimum requirement)
+- Instance lifecycle coordination (create, get, stop)
+- Resource limits (max instances from config enforced)
+- Auto-restart with exponential backoff (1s, 2s, 4s, 8s, 16s delays)
+- Periodic health checks via background task
+- Idle timeout handling with activity tracking
+- Integration with OrchestratorStore for persistence
+- Integration with PortPool for port allocation
+
+### Key Design Decisions
+
+1. **Arc<Mutex<>> Pattern**: Used for shared state across async tasks
+   - `instances: Arc<Mutex<HashMap<String, Arc<Mutex<OpenCodeInstance>>>>>`
+   - Double Arc<Mutex<>> because instances can be accessed individually while manager is being used
+   - Prevents deadlocks by releasing locks before acquiring new ones
+
+2. **Restart Tracker with Backoff**: Exponential backoff prevents resource thrashing
+   - Starts at 1s, doubles each attempt (1s, 2s, 4s, 8s, 16s)
+   - Max 5 attempts before marking instance as Error
+   - Tracker resets when instance becomes healthy
+
+3. **Activity Tracking for Idle Timeout**: 
+   - Instant::now() cannot be derived for Default
+   - Tracks last_activity timestamp per instance
+   - Health check loop stops instances exceeding idle_timeout
+
+4. **get_or_create Logic Flow**:
+   1. Check memory for existing instance by path
+   2. If running/starting, return it with activity update
+   3. If stopped/error, attempt restart with backoff
+   4. Check database for persisted instance
+   5. Check max instances limit
+   6. Spawn new instance if allowed
+
+5. **Health Check Background Task**:
+   - Uses `tokio::spawn` for independent async task
+   - Shutdown signal via `Arc<Mutex<bool>>`
+   - Interval-based polling from config
+   - Handles crash detection and idle timeout
+
+### Test Coverage (16 tests)
+
+1. `test_new_creates_manager` - Manager initialization
+2. `test_get_instance_returns_none_when_not_found` - Get by ID miss
+3. `test_get_instance_by_path_returns_none_when_not_found` - Get by path miss
+4. `test_get_status_initial_empty` - Initial status values
+5. `test_stop_instance_returns_error_when_not_found` - Stop nonexistent
+6. `test_stop_all_succeeds_when_empty` - Empty shutdown
+7. `test_recover_from_db_succeeds_when_empty` - Empty recovery
+8. `test_record_activity_creates_tracker` - Activity tracking init
+9. `test_record_activity_updates_timestamp` - Activity timestamp update
+10. `test_manager_status_struct` - Status struct fields
+11. `test_restart_tracker_default` - Restart tracker defaults
+12. `test_activity_tracker_default` - Activity tracker recent
+13. `test_get_or_create_enforces_max_instances` - Max limit enforcement
+14. `test_concurrent_access_to_manager` - Thread safety
+15. `test_health_check_loop_can_be_stopped` - Shutdown signal
+16. `test_port_allocation_on_spawn_failure` - Port release on failure
+
+### Patterns That Worked Well
+
+1. **TDD Approach**: Tests written alongside implementation caught issues early
+2. **External Instance Constructor**: `OpenCodeInstance::external()` for testing without process spawn
+3. **High Port Numbers in Tests**: Used 14100+ to avoid conflicts with running services
+4. **Shutdown Signal Pattern**: Boolean flag for graceful background task termination
+5. **Derive Default where possible**: Clippy suggested using `#[derive(Default)]` for RestartTracker
+
+### Gotchas
+
+1. **uuid dependency**: Had to add `uuid = { version = "1", features = ["v4"] }` to Cargo.toml
+2. **Clippy derivable_impls**: Manual Default impl for RestartTracker was unnecessary since all fields have defaults
+3. **Double lock pattern**: Need to drop locks before acquiring new ones to prevent deadlock
+4. **ActivityTracker cannot derive Default**: Uses `Instant::now()` which isn't const
+5. **Test spawn timeout**: Used 5s timeout which is enough for test but spawn typically fails fast
+
+### API Surface
+
+```rust
+impl InstanceManager {
+    pub async fn new(config, store, port_pool) -> Result<Self>
+    pub async fn get_or_create(&self, project_path) -> Result<Arc<Mutex<OpenCodeInstance>>>
+    pub async fn get_instance(&self, id) -> Option<Arc<Mutex<OpenCodeInstance>>>
+    pub async fn get_instance_by_path(&self, path) -> Option<Arc<Mutex<OpenCodeInstance>>>
+    pub async fn stop_instance(&self, id) -> Result<()>
+    pub async fn stop_all(&self) -> Result<()>
+    pub async fn get_status(&self) -> ManagerStatus
+    pub async fn recover_from_db(&self) -> Result<()>
+    pub fn start_health_check_loop(&self) -> JoinHandle<()>
+    pub async fn record_activity(&self, id: &str)
+}
+```
+
+### Files Modified/Created
+- `src/orchestrator/manager.rs` - New file (620+ lines with tests)
+- `src/orchestrator/mod.rs` - Added `pub mod manager;`
+- `Cargo.toml` - Added `uuid` dependency
+
+### Next Steps
+InstanceManager will be used by:
+- Task 11: Process discovery integration
+- Task 12: OpenCode REST client integration
+- Task 27: Integration layer
+- Task 28: Main entry point with graceful shutdown
