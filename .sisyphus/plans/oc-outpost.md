@@ -123,7 +123,7 @@ Each TODO follows RED-GREEN-REFACTOR:
 3. **REFACTOR**: Clean up while keeping green
 
 ### Test Setup Task
-- [ ] 0. Setup test infrastructure in first task
+- [x] 0. Setup test infrastructure in first task
   - Install: Part of Cargo.toml
   - Config: Create test utilities module
   - Verify: `cargo nextest run` shows test framework working
@@ -1848,4 +1848,4 @@ cargo nextest run  # All pass
 - [ ] Graceful shutdown cleans up resources
 - [ ] State persists across restarts
 - [ ] Rate limiting prevents Telegram errors
-- [ ] Tests cover >80% of core logic
+- [x] Tests cover >80% of core logic
