@@ -1,20 +1,26 @@
 use crate::bot::{BotState, Command};
-use crate::types::error::Result;
 use std::sync::Arc;
 use teloxide::prelude::*;
 
+pub mod clear;
 pub mod connect;
 pub mod disconnect;
+pub mod help;
 pub mod link;
 pub mod new;
 pub mod session;
 pub mod sessions;
+pub mod status;
 pub mod stream;
 
+#[allow(unused_imports)]
+pub use clear::handle_clear;
 #[allow(unused_imports)]
 pub use connect::handle_connect;
 #[allow(unused_imports)]
 pub use disconnect::handle_disconnect;
+#[allow(unused_imports)]
+pub use help::handle_help;
 #[allow(unused_imports)]
 pub use link::handle_link;
 #[allow(unused_imports)]
@@ -22,35 +28,9 @@ pub use session::handle_session;
 #[allow(unused_imports)]
 pub use sessions::handle_sessions;
 #[allow(unused_imports)]
+pub use status::handle_status;
+#[allow(unused_imports)]
 pub use stream::handle_stream;
-
-#[allow(dead_code)]
-pub async fn handle_status(
-    bot: Bot,
-    msg: Message,
-    cmd: Command,
-    state: Arc<BotState>,
-) -> Result<()> {
-    let _ = (bot, msg, cmd, state);
-    Ok(())
-}
-
-#[allow(dead_code)]
-pub async fn handle_clear(
-    bot: Bot,
-    msg: Message,
-    cmd: Command,
-    state: Arc<BotState>,
-) -> Result<()> {
-    let _ = (bot, msg, cmd, state);
-    Ok(())
-}
-
-#[allow(dead_code)]
-pub async fn handle_help(bot: Bot, msg: Message, cmd: Command, state: Arc<BotState>) -> Result<()> {
-    let _ = (bot, msg, cmd, state);
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {
@@ -67,6 +47,11 @@ mod tests {
         let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_session;
         let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_status;
         let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_clear;
-        let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_help;
+        let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = help::handle_help;
+    }
+
+    #[test]
+    fn test_status_handler_signature() {
+        let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = status::handle_status;
     }
 }

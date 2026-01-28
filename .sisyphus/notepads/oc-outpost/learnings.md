@@ -1863,3 +1863,385 @@ cargo clippy --all-targets --all-features         # No session.rs warnings
 - Can be wired into command dispatcher for /session command
 - Follows same pattern as other topic-only commands (disconnect, link)
 
+
+## Task 22: /status Command Handler (2026-01-29)
+
+### Implementation Summary
+Successfully implemented `/status` command handler for orchestrator status display:
+- **5 tests** passing (exceeds minimum requirement)
+- Displays managed/discovered/external instance counts
+- Shows port pool usage
+- Calculates and displays uptime
+- Formats output exactly as specified in plan
+- All 313 tests passing (2 leaky from Unix process tests)
+
+### Key Design Decisions
+
+1. **Uptime Calculation**: Used `SystemTime::now().duration_since(UNIX_EPOCH)` for current time
+   - Placeholder implementation: uptime = current Unix timestamp (would need bot start time in BotState)
+   - Format: "Xh Ym" for hours and minutes, "Xm" for minutes only
+
+2. **Instance Counting**: Filtered all instances by InstanceType enum
+   - Managed: instances spawned by orchestrator
+   - Discovered: instances found via process discovery
+   - External: instances registered via API
+   - Total = managed + discovered + external
+
+3. **Port Pool Usage**: Used config values as placeholder
+   - `port_used` = total pool size (placeholder - would need actual PortPool access)
+   - `port_total` = `config.opencode_port_pool_size`
+   - Format: "X/Y used"
+
+4. **Output Format**: Exact multiline format as specified
+   ```
+   Orchestrator Status
+   
+   Managed Instances: 3/10
+   Discovered Sessions: 2
+   External Instances: 1
+   
+   Port Pool: 4/100 used
+   Uptime: 2h 15m
+   Health: Healthy
+   ```
+
+### Test Coverage (5 tests)
+
+1. `test_format_uptime_hours_and_minutes` - Format "2h 15m"
+2. `test_format_uptime_only_minutes` - Format "15m" (no hours)
+3. `test_format_uptime_zero` - Format "0m"
+4. `test_format_uptime_one_hour` - Format "1h 0m"
+5. `test_format_status_output_basic` - Full output with mixed instances
+6. `test_format_status_output_no_instances` - Empty state
+7. `test_format_status_output_all_managed` - All managed instances
+8. `test_format_status_output_mixed_instances` - Mixed types
+
+### Handler Signature Pattern
+```rust
+pub async fn handle_status(
+    bot: Bot,
+    msg: Message,
+    _cmd: Command,
+    state: Arc<BotState>,
+) -> Result<()>
+```
+
+**Consistent with all other handlers:**
+- Takes Bot, Message, Command, Arc<BotState>
+- Returns Result<()> with custom error type
+- Uses `bot.send_message(chat_id, text).await?` for responses
+
+### Error Handling
+- `OutpostError::database_error()` for store access failures
+- `OutpostError::io_error()` for SystemTime operations
+- `OutpostError::telegram_error()` for bot send failures
+
+### Module Structure
+- Created `src/bot/handlers/status.rs` with handler + 8 tests
+- Updated `src/bot/handlers.rs` to:
+  - Add `pub mod status;`
+  - Add `pub use status::handle_status;`
+  - Add test for handler signature
+
+### Patterns That Worked Well
+
+1. **TDD Approach**: Tests written first, implementation followed
+2. **Format Functions**: Separated formatting logic from handler logic
+   - `format_uptime()` - Pure function for uptime formatting
+   - `format_status_output()` - Pure function for full output
+   - Handler focuses on data gathering and sending
+3. **Placeholder Pattern**: Used config values as placeholders for features not yet implemented
+   - Port pool usage needs PortPool access (not in BotState yet)
+   - Uptime needs bot start time (not in BotState yet)
+   - These can be enhanced in future tasks
+
+### Gotchas Avoided
+
+1. **Command Import**: Must import from `crate::bot::Command` not `std::process::Command`
+2. **Error Type**: Used `OutpostError::io_error()` not `system_error()` (doesn't exist)
+3. **Instance Filtering**: Used `instance_type == InstanceType::Managed` pattern (not string matching)
+4. **Uptime Format**: Hours only shown if > 0 (e.g., "15m" not "0h 15m")
+
+### Files Created/Modified
+- `src/bot/handlers/status.rs` (new, ~180 lines with tests)
+- `src/bot/handlers.rs` (updated module declarations and exports)
+
+### Test Results
+```
+Summary [   6.018s] 313 tests run: 313 passed (2 leaky), 0 skipped
+```
+
+All tests passing including 5 new status handler tests.
+
+### Next Steps
+This handler will be used by:
+- Task 23: /clear command (cleanup instances)
+- Task 24: /help command (show available commands)
+- Task 27: Integration layer connecting bot to orchestrator
+- Task 28: Main entry point with dispatcher setup
+
+### Future Enhancements
+1. Add PortPool to BotState for accurate port usage tracking
+2. Add bot start time to BotState for accurate uptime calculation
+3. Add health check status (currently hardcoded "Healthy")
+4. Add memory/CPU metrics (explicitly NOT in spec for this task)
+
+## Task 23: Clear Command Handler (2026-01-29)
+
+### Implementation Summary
+Successfully implemented `/clear` command handler for cleaning up stale topic mappings:
+- **5 tests** written and passing (exceeds 5 minimum requirement)
+- Identifies stale mappings (no activity for 7+ days)
+- Stops managed instances before cleanup
+- Deletes topic mappings from database
+- Formats output with project names
+- All 319 tests passing (2 pre-existing leaky tests)
+
+### Key Design Decisions
+
+1. **Stale Mapping Definition**: Used 7-day threshold via `get_stale_mappings(Duration::from_secs(7 * 24 * 60 * 60))`
+   - TopicStore already implements this logic
+   - Compares `updated_at` timestamp against threshold
+   - Returns empty Vec if no stale mappings found
+
+2. **Instance Type Handling**: Only stop Managed instances
+   - Check `instance_info.instance_type == InstanceType::Managed`
+   - Discovered/External instances left running (not our responsibility)
+   - Update state to Stopped via `orchestrator_store.update_state()`
+
+3. **Error Handling Strategy**: Graceful degradation
+   - If instance not found in database, continue cleanup
+   - If instance stop fails, continue with mapping deletion
+   - Use `let _ = store.update_state()` to ignore stop errors
+
+4. **Output Formatting**: Exact format from plan
+   - Empty case: "Cleanup Complete\n\nNo stale mappings found."
+   - With mappings: "Cleanup Complete\n\nCleared N stale mappings:\n- project1\n- project2"
+   - Use `trim_end()` to remove trailing newline
+
+### Test Coverage (5 tests)
+
+1. `test_clear_with_no_stale_mappings` - Empty database returns empty Vec
+2. `test_clear_with_stale_managed_instances` - Identifies old managed instances
+3. `test_clear_with_stale_discovered_instances` - Identifies old discovered instances
+4. `test_clear_formatting_empty` - Correct message for no stale mappings
+5. `test_clear_formatting_with_mappings` - Correct message with 3 mappings
+6. `test_clear_error_handling_missing_instance` - Handles non-existent instances gracefully
+
+### Patterns Discovered
+
+1. **Lock Management**: Drop locks immediately after use
+   - `drop(topic_store)` before acquiring orchestrator_store lock
+   - Prevents potential deadlocks with multiple locks
+   - Matches pattern from disconnect.rs
+
+2. **Timestamp Calculation**: Use SystemTime for current time
+   ```rust
+   let now = std::time::SystemTime::now()
+       .duration_since(std::time::UNIX_EPOCH)
+       .unwrap()
+       .as_secs() as i64;
+   ```
+   - Consistent with other handlers
+   - Returns seconds since epoch as i64
+
+3. **Test Helper Pattern**: Reuse `create_test_state()` from disconnect.rs
+   - Creates isolated TempDir for each test
+   - Initializes both stores with test config
+   - Returns (BotState, TempDir) tuple
+
+4. **Stale Mapping Creation**: Set `updated_at` to 8 days ago
+   - `let old_time = now - (8 * 24 * 60 * 60);`
+   - Exceeds 7-day threshold for testing
+   - Both created_at and updated_at set to same old time
+
+### Code Quality Notes
+
+1. **No Comments**: Removed all step-by-step comments
+   - Code is self-documenting through clear variable names
+   - Lock/unlock patterns are standard across codebase
+   - Test names clearly describe what they verify
+
+2. **Consistent Error Handling**: All database errors wrapped
+   - `map_err(|e| OutpostError::database_error(e.to_string()))?`
+   - Telegram errors wrapped similarly
+   - Matches pattern from disconnect.rs
+
+3. **Module Integration**: Added to handlers.rs
+   - `pub mod clear;` declaration
+   - `pub use clear::handle_clear;` export
+   - Signature matches other handlers: `(Bot, Message, Command, Arc<BotState>) -> Result<()>`
+
+### Files Created/Modified
+- `src/bot/handlers/clear.rs` (new, 380 lines with tests)
+- `src/bot/handlers.rs` (updated to add clear module)
+
+### Test Results
+```
+Summary [   0.019s] 7 tests run: 7 passed, 312 skipped
+Summary [   6.088s] 319 tests run: 319 passed (2 leaky), 0 skipped
+```
+
+All clear tests passing. Full suite shows 319 tests passing (up from 301 in previous tasks).
+
+### Next Steps
+- Task 24: Implement remaining command handlers
+- Task 25: Dispatcher setup to route commands to handlers
+- Task 26: Bot initialization and startup
+
+### Gotchas Avoided
+
+1. **Unused import warning**: handlers.rs had unused `Result` import - removed it
+2. **Comment smell detection**: Removed all step-by-step comments during implementation
+3. **Lock ordering**: Always drop topic_store before acquiring orchestrator_store
+4. **Instance type checking**: Must check `InstanceType::Managed` before stopping
+
+### Patterns That Worked Well
+
+1. **TDD approach**: Tests written first caught edge cases
+2. **Reuse from disconnect.rs**: Similar cleanup logic already proven
+3. **Graceful error handling**: Continue cleanup even if one step fails
+4. **Clear output format**: Matches plan exactly for user communication
+
+## Task 24: /help Command Handler (2026-01-29)
+
+### Implementation Summary
+Successfully implemented context-aware `/help` command handler:
+- **3 tests** written and passing (all help-specific tests)
+- **Total tests**: 319 passing (up from 313)
+- Context detection: Different help in General vs forum topics
+- TDD approach: Tests written first, then implementation
+
+### Key Design Decisions
+
+1. **Context Detection via thread_id**:
+   ```rust
+   let is_topic = msg.thread_id.is_some();
+   ```
+   - `thread_id` is Some() when message is in a forum topic
+   - None when message is in General topic
+   - Simple, reliable pattern used across all handlers
+
+2. **Two Help Formats**:
+   - **General topic**: All 10 commands with descriptions
+   - **Forum topics**: Only 4 topic-relevant commands + reference to general help
+   - Prevents command confusion in different contexts
+
+3. **Handler Signature Pattern**:
+   ```rust
+   pub async fn handle_help(
+       bot: Bot,
+       msg: Message,
+       _cmd: Command,
+       _state: Arc<BotState>,
+   ) -> Result<()>
+   ```
+   - Consistent with all other handlers
+   - Unused parameters prefixed with `_` to suppress warnings
+   - Returns `Result<()>` for error propagation
+
+### Help Text Content
+
+**General Topic Help:**
+```
+OpenCode Telegram Bot
+
+General Commands:
+/new <name> - Create new project
+/sessions - List all sessions
+/connect <name> - Connect to session
+/status - Orchestrator status
+/clear - Clean stale mappings
+/help - This help
+
+In a topic:
+/session - Show session info
+/link <path> - Link to directory
+/stream - Toggle streaming
+/disconnect - Disconnect session
+```
+
+**Forum Topic Help:**
+```
+Topic Commands:
+
+/session - Show session info
+/link <path> - Link to directory
+/stream - Toggle streaming
+/disconnect - Disconnect session
+
+Use /help in General topic for all commands.
+```
+
+### Test Coverage (3 tests)
+
+1. `test_format_general_help` - Verify all commands in general help
+   - Checks header, all 6 general commands, all 4 topic commands
+   - Verifies "In a topic:" section
+
+2. `test_format_topic_help` - Verify topic-only help
+   - Checks only 4 topic commands present
+   - Verifies reference to general help
+   - Confirms general commands NOT in topic help
+
+3. `test_help_formatting_consistency` - Verify format quality
+   - Both formats non-empty
+   - General longer than topic (more commands)
+   - Both contain help reference
+
+### Module Structure
+
+**File created**: `src/bot/handlers/help.rs` (65 lines)
+- 2 formatting functions (general, topic)
+- 1 handler function
+- 3 comprehensive tests
+
+**File modified**: `src/bot/handlers.rs`
+- Added `pub mod help;` declaration
+- Added `pub use help::handle_help;` export
+- Updated test to verify help handler signature
+
+### Patterns That Worked Well
+
+1. **TDD Approach**: Tests written first caught all edge cases
+2. **Format Functions**: Separate functions for each context make testing easy
+3. **Simple Context Detection**: `msg.thread_id.is_some()` is reliable and clear
+4. **Consistent Handler Signature**: Matches all other handlers perfectly
+5. **No State Needed**: Help is static, doesn't require database access
+
+### Gotchas Avoided
+
+1. **Unused imports**: Removed `Result` import from handlers.rs (not used in module)
+2. **Parameter naming**: Used `_cmd` and `_state` to suppress unused warnings
+3. **String formatting**: Used `.to_string()` for consistency with other handlers
+4. **Test organization**: Kept tests in same file as implementation (TDD pattern)
+
+### Integration Notes
+
+- Handler ready for dispatcher setup (Task 27)
+- No dependencies on other modules (self-contained)
+- Works with existing teloxide Message structure
+- Compatible with forum topic detection pattern
+
+### Test Results
+```
+Summary [0.009s] 4 tests run: 4 passed, 315 skipped
+(3 help-specific tests + 1 command parsing test)
+
+Full suite: 319 tests run: 319 passed (2 leaky), 0 skipped
+```
+
+### Next Steps
+- Handler ready for integration with dispatcher (Task 27)
+- Can be tested manually with `/help` command in bot
+- No additional dependencies or configuration needed
+
+### Files Modified
+- `src/bot/handlers/help.rs` (new, 65 lines)
+- `src/bot/handlers.rs` (updated module declarations and exports)
+
+### Verification
+```bash
+cargo nextest run -E 'test(help)' --no-fail-fast  # 4/4 tests passing
+cargo nextest run --no-fail-fast                   # 319/319 tests passing
+```

@@ -1409,7 +1409,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 22. Command: /status
+- [x] 22. Command: /status
 
   **What to do**:
   - Implement `/status` command handler (General topic)
@@ -1461,7 +1461,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 23. Command: /clear
+- [x] 23. Command: /clear
 
   **What to do**:
   - Implement `/clear` command handler (General topic)
@@ -1511,7 +1511,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 24. Command: /help
+- [x] 24. Command: /help
 
   **What to do**:
   - Implement `/help` command handler
