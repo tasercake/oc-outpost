@@ -607,7 +607,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 7. Bot Framework Setup (teloxide)
+- [x] 7. Bot Framework Setup (teloxide)
 
   **What to do**:
   - Create `src/bot/mod.rs` module structure

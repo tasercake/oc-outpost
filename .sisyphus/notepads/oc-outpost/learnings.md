@@ -388,3 +388,171 @@ These database functions will be used by:
 - No additional indexes needed for current query patterns
 - WAL mode enabled by `init_topics_db()` for better concurrency
 
+
+## Task 7: Bot Framework Setup (teloxide) - 2026-01-29
+
+### Implementation Summary
+Successfully implemented teloxide bot framework structure with:
+- Command enum with 10 variants using BotCommands derive macro
+- Handler function signatures (stubs) for all 10 commands
+- BotState struct for dependency injection with Arc<Mutex<>> pattern
+- 17 tests passing (12 command parsing + 3 BotState + 1 handler signature + 1 config)
+
+### Key Patterns & Conventions
+
+#### 1. BotCommands Derive Macro Pattern
+```rust
+#[derive(BotCommands, Clone, Debug, PartialEq)]
+#[command(rename_rule = "lowercase", description = "These commands are supported:")]
+pub enum Command {
+    #[command(description = "create new project and session - Usage: /new <project_name>")]
+    New(String),
+    
+    #[command(description = "list all sessions")]
+    Sessions,
+}
+```
+
+**Why this works:**
+- `rename_rule = "lowercase"` converts enum variants to lowercase commands (/new, /sessions)
+- `description` attributes generate help text for `/help` command
+- Enum variants with `(String)` parse command arguments automatically
+- `Command::parse("/new my-project", "bot")` returns `Command::New("my-project".to_string())`
+
+#### 2. Handler Function Signature Pattern
+```rust
+pub async fn handle_new(
+    bot: Bot,
+    msg: Message,
+    cmd: Command,
+    state: Arc<BotState>,
+) -> Result<()> {
+    // TODO: Implementation in later tasks
+    Ok(())
+}
+```
+
+**Pattern benefits:**
+- Consistent signature across all handlers
+- `Arc<BotState>` allows shared state across handlers
+- `Result<()>` uses custom error type from `types::error`
+- Stubs compile and type-check without implementation
+
+#### 3. BotState Dependency Injection Pattern
+```rust
+pub struct BotState {
+    pub orchestrator_store: Arc<Mutex<OrchestratorStore>>,
+    pub topic_store: Arc<Mutex<TopicStore>>,
+    pub config: Arc<Config>,
+}
+
+impl BotState {
+    pub fn new(
+        orchestrator_store: OrchestratorStore,
+        topic_store: TopicStore,
+        config: Config,
+    ) -> Self {
+        Self {
+            orchestrator_store: Arc::new(Mutex::new(orchestrator_store)),
+            topic_store: Arc::new(Mutex::new(topic_store)),
+            config: Arc::new(config),
+        }
+    }
+}
+```
+
+**Why Arc<Mutex<>>:**
+- `Arc` allows multiple handlers to share same state
+- `Mutex` provides interior mutability for async contexts
+- Config is read-only so only needs `Arc` (no Mutex)
+- Stores need mutable access for database operations
+
+#### 4. Module Structure Pattern
+```rust
+// src/bot/mod.rs
+mod commands;
+mod handlers;
+mod state;
+
+pub use commands::Command;
+pub use state::BotState;
+
+#[allow(unused_imports)]
+pub use handlers::*;
+```
+
+**Why this structure:**
+- Separate files for commands, handlers, state (single responsibility)
+- Public exports in mod.rs for clean API
+- `#[allow(unused_imports)]` on handlers::* since they're not used yet
+- Handlers will be used in dispatcher setup (Task 8)
+
+### Test Coverage (17 tests)
+
+1. **Command parsing** (12 tests)
+   - Each of 10 commands parses correctly from string
+   - Command descriptions generate help text
+   - Invalid commands return error
+
+2. **BotState construction** (3 tests)
+   - BotState::new() creates valid state
+   - Stores are accessible via Arc<Mutex<>>
+   - Config is accessible via Arc
+
+3. **Handler signatures** (1 test)
+   - All 10 handler functions have correct type signature
+   - Compile-time verification of function types
+
+### Teloxide Documentation Insights
+
+From Context7 lookup:
+- **Bot initialization**: `Bot::new("TOKEN").throttle(Limits::default())`
+- **Throttle adapter**: Prevents hitting Telegram API rate limits
+- **Dispatcher schema**: Uses `dptree` for routing updates to handlers
+- **Command filtering**: `teloxide::filter_command::<Command, _>()` in dispatcher
+- **Forum topic support**: Built-in methods for forum topic management
+
+### Dependencies Used
+- `teloxide = { version = "0.17", features = ["macros", "throttle"] }`
+- `tokio = { version = "1", features = ["full"] }`
+- Already had: `Arc`, `Mutex` from std
+
+### Dead Code Handling
+Added `#[allow(dead_code)]` to:
+- Command enum (used in tests but not in main yet)
+- All handler functions (will be used in dispatcher)
+- BotState struct and methods (will be used in main)
+- Config, stores, db functions (will be used when bot runs)
+
+**Rationale**: These are framework components that will be used in later tasks (dispatcher setup, bot initialization). Using `#[allow(dead_code)]` is appropriate for incremental development.
+
+### Files Created
+- `src/bot/mod.rs` - Module root with public exports
+- `src/bot/commands.rs` - Command enum with 10 variants + 12 tests
+- `src/bot/handlers.rs` - Handler stubs for 10 commands + 1 test
+- `src/bot/state.rs` - BotState struct + 3 tests
+
+### Test Results
+```
+Summary [   0.037s] 17 tests run: 17 passed, 109 skipped
+```
+
+All bot tests passing. Build succeeds with warnings (expected for unused code).
+
+### Next Steps
+These bot components will be used by:
+- Task 8: Dispatcher setup with dptree
+- Task 9: Bot initialization with throttling
+- Task 10+: Handler implementations for each command
+
+### Gotchas Avoided
+- Used `orchestrator::store::OrchestratorStore` path (not re-exported in orchestrator::mod)
+- Added `#[allow(dead_code)]` to prevent clippy errors on framework code
+- Docstrings on command variants are required by BotCommands macro (not code smell)
+- Handler stubs use `let _ = (bot, msg, cmd, state);` to avoid unused variable warnings
+
+### Patterns That Worked Well
+1. TDD approach: Tests written alongside implementation
+2. Incremental development: Stubs compile and type-check before implementation
+3. Context7 lookup: Found exact patterns from teloxide docs
+4. Module separation: Clean boundaries between commands, handlers, state

@@ -1,0 +1,118 @@
+use crate::bot::{BotState, Command};
+use crate::types::error::Result;
+use std::sync::Arc;
+use teloxide::prelude::*;
+
+#[allow(dead_code)]
+pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotState>) -> Result<()> {
+    let _ = (bot, msg, cmd, state);
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub async fn handle_sessions(
+    bot: Bot,
+    msg: Message,
+    cmd: Command,
+    state: Arc<BotState>,
+) -> Result<()> {
+    let _ = (bot, msg, cmd, state);
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub async fn handle_connect(
+    bot: Bot,
+    msg: Message,
+    cmd: Command,
+    state: Arc<BotState>,
+) -> Result<()> {
+    let _ = (bot, msg, cmd, state);
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub async fn handle_disconnect(
+    bot: Bot,
+    msg: Message,
+    cmd: Command,
+    state: Arc<BotState>,
+) -> Result<()> {
+    let _ = (bot, msg, cmd, state);
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub async fn handle_link(bot: Bot, msg: Message, cmd: Command, state: Arc<BotState>) -> Result<()> {
+    let _ = (bot, msg, cmd, state);
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub async fn handle_stream(
+    bot: Bot,
+    msg: Message,
+    cmd: Command,
+    state: Arc<BotState>,
+) -> Result<()> {
+    let _ = (bot, msg, cmd, state);
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub async fn handle_session(
+    bot: Bot,
+    msg: Message,
+    cmd: Command,
+    state: Arc<BotState>,
+) -> Result<()> {
+    let _ = (bot, msg, cmd, state);
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub async fn handle_status(
+    bot: Bot,
+    msg: Message,
+    cmd: Command,
+    state: Arc<BotState>,
+) -> Result<()> {
+    let _ = (bot, msg, cmd, state);
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub async fn handle_clear(
+    bot: Bot,
+    msg: Message,
+    cmd: Command,
+    state: Arc<BotState>,
+) -> Result<()> {
+    let _ = (bot, msg, cmd, state);
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub async fn handle_help(bot: Bot, msg: Message, cmd: Command, state: Arc<BotState>) -> Result<()> {
+    let _ = (bot, msg, cmd, state);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_handler_signatures_compile() {
+        let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_new;
+        let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_sessions;
+        let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_connect;
+        let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_disconnect;
+        let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_link;
+        let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_stream;
+        let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_session;
+        let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_status;
+        let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_clear;
+        let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_help;
+    }
+}

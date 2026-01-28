@@ -1,3 +1,4 @@
+mod bot;
 mod config;
 mod db;
 mod forum;
