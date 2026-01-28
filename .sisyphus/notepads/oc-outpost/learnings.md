@@ -884,3 +884,120 @@ InstanceManager will be used by:
 - Task 12: OpenCode REST client integration
 - Task 27: Integration layer
 - Task 28: Main entry point with graceful shutdown
+
+## Task 11: Process Discovery Implementation (2026-01-29)
+
+### Implementation Summary
+Successfully implemented process discovery system for finding running OpenCode instances:
+- **20 tests** passing (exceeds 12 minimum requirement)
+- Process discovery via `ps aux` parsing
+- Port detection via `lsof -p PID -a -i -sTCP:LISTEN`
+- Working directory detection via `lsof -p PID -a -d cwd`
+- Session query via OpenCode REST API
+- TUI vs Serve mode detection
+
+### Key Design Decisions
+
+1. **Async Command Execution**: Used `tokio::process::Command` for non-blocking I/O
+   - Commands run async to avoid blocking the runtime
+   - Uses `output()` method which returns stdout/stderr/status
+
+2. **Fallback Chain for Working Directory**:
+   1. Try `lsof -d cwd` first
+   2. Fallback to `--project` flag from command line
+   3. Default to "/" if both fail
+
+3. **Port Detection Strategy**:
+   1. Try `lsof -i -sTCP:LISTEN` first
+   2. Fallback to `--port` flag from command line
+   3. None if not in serve mode
+
+4. **Mode Detection**: Simple string matching
+   - If command line contains "serve" → Serve mode
+   - Otherwise → TUI mode
+
+### Parsing Patterns
+
+**ps aux output format:**
+```
+USER  PID  %CPU  %MEM  VSZ  RSS  TTY  STAT  START  TIME  COMMAND
+```
+- PID is column 1 (0-indexed)
+- Command starts at column 10
+
+**lsof port output format:**
+```
+COMMAND  PID  USER  FD  TYPE  DEVICE  SIZE/OFF  NODE  NAME
+```
+- Port in NAME column: `*:PORT (LISTEN)` or `localhost:PORT (LISTEN)`
+
+**lsof cwd output format:**
+```
+COMMAND  PID  USER  FD  TYPE  DEVICE  SIZE/OFF  NODE  NAME
+```
+- Path is the last column when FD contains "cwd"
+
+### Clippy Insights
+
+1. **double_ended_iterator_last**: Use `next_back()` instead of `last()` on `DoubleEndedIterator`
+   - `part.split(':').last()` → `part.split(':').next_back()`
+   - More efficient: doesn't iterate the entire iterator
+
+2. **unused_imports on re-exports**: Add `#[allow(unused_imports)]` for public API exports
+   - These will be used by other modules but aren't used within the current compilation unit
+
+### Test Coverage (20 tests)
+
+1. `test_parse_ps_output` - Parse serve mode with port and project
+2. `test_parse_lsof_port_output` - Parse port from `*:4100` format
+3. `test_parse_lsof_cwd_output` - Parse working directory
+4. `test_detect_tui_mode` - Detect TUI mode (no serve command)
+5. `test_detect_serve_mode` - Detect serve mode with port
+6. `test_skip_grep_processes` - Filter out grep processes
+7. `test_skip_header_line` - Skip ps aux header
+8. `test_extract_port_equals_syntax` - Handle `--port=4200` syntax
+9. `test_extract_project_from_args` - Extract project path
+10. `test_discover_all_returns_empty_when_none` - Handle no processes
+11. `test_invalid_ps_output` - Handle malformed ps output
+12. `test_multiple_processes` - Parse multiple opencode processes
+13. `test_parse_lsof_port_output_localhost` - Handle `localhost:PORT` format
+14. `test_invalid_lsof_port_output` - Handle non-numeric ports
+15. `test_empty_lsof_output` - Handle empty lsof output
+16. `test_get_session_info_returns_none_on_error` - Handle connection errors
+17. `test_discovered_instance_construction` - Verify struct fields
+18. `test_opencode_mode_equality` - Verify enum equality
+19. `test_discovered_instance_clone` - Verify Clone trait
+20. `test_extract_port_short_flag` - Handle `-p` short flag
+
+### API Surface
+
+```rust
+pub enum OpenCodeMode {
+    Tui,
+    Serve,
+}
+
+pub struct DiscoveredInstance {
+    pub pid: u32,
+    pub port: Option<u16>,
+    pub working_dir: PathBuf,
+    pub mode: OpenCodeMode,
+}
+
+impl Discovery {
+    pub async fn discover_all() -> Result<Vec<DiscoveredInstance>>;
+    pub async fn discover_by_path(path: &Path) -> Result<Option<DiscoveredInstance>>;
+    pub async fn get_session_info(port: u16) -> Result<Option<SessionInfo>>;
+}
+```
+
+### Files Created
+- `src/opencode/mod.rs` - Module root with re-exports
+- `src/opencode/discovery.rs` - Discovery implementation with 20 tests
+- Updated `src/main.rs` - Added `mod opencode;`
+
+### Next Steps
+This module will be used by:
+- Task 12: Auto-registration of discovered instances
+- Task 27: Integration layer for instance management
+- InstanceManager for handling external/discovered instances

@@ -843,7 +843,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 11. Process Discovery Implementation
+- [x] 11. Process Discovery Implementation
 
   **What to do**:
   - Create `src/opencode/discovery.rs`
