@@ -1081,3 +1081,140 @@ cargo nextest run -E 'test(client)'  # 16/16 tests passing
 cargo build --tests                   # No warnings for client module
 ```
 
+
+## Task 13: SSE StreamHandler Implementation (2026-01-29)
+
+### Implementation Summary
+Successfully implemented SSE stream handler for OpenCode events:
+- **19 tests** passing (exceeds 15 minimum requirement)
+- SSE connection using reqwest-eventsource
+- Parse 6 OpenCode SSE event types
+- Message batching with 2-second throttle
+- Reconnection with exponential backoff (1s, 2s, 4s, 8s, 16s max)
+- Message deduplication for Telegram echo prevention
+- Event emission via tokio mpsc channel
+
+### Key Design Decisions
+
+1. **reqwest-eventsource for SSE**: Used `EventSource::new(request)` pattern
+   - Wraps reqwest request builder for SSE connection
+   - Returns `Stream<Item = Result<Event, Error>>`
+   - Handles reconnection internally (but we add custom backoff logic)
+
+2. **Custom Event Types**: Created `StreamEvent` enum distinct from API types
+   - `TextChunk` - Batched text from assistant
+   - `ToolInvocation` - Tool started with name and args
+   - `ToolResult` - Tool execution result
+   - `MessageComplete` - Full message with content
+   - `SessionIdle` - Ready for input
+   - `SessionError` - Error occurred
+   - `PermissionRequest` - Permission needed
+   - `PermissionReply` - Permission response
+   - `Disconnected` / `Reconnected` - Connection status
+
+3. **Message Batching Pattern**:
+   - Collect text chunks in String buffer
+   - Track `last_batch_time` with `Instant::now()`
+   - Send batched text after 2 seconds of inactivity
+   - Flush before tool/message events
+
+4. **Deduplication with Expiry**:
+   - Store recent Telegram messages in `HashMap<String, HashSet<String>>`
+   - Auto-cleanup after 30 seconds via spawned task
+   - Check before sending text chunks
+
+5. **Subscription Management**:
+   - `SubscriptionHandle` holds cancel channel and task handle
+   - `oneshot::Sender<()>` for cancel signal
+   - Graceful unsubscribe drops handle and sends cancel
+
+### SSE Event Format (OpenCode-specific)
+```
+event: message.part.updated
+data: {"type":"text","text":"Hello"}
+
+event: message.updated
+data: {"id":"msg_123","role":"assistant","content":[...]}
+
+event: session.idle
+data: {}
+
+event: session.error
+data: {"message":"Error occurred"}
+
+event: permission.updated
+data: {"id":"perm_123","type":"file_read","path":"/foo"}
+
+event: permission.replied
+data: {"id":"perm_123","allowed":true}
+```
+
+### Test Patterns
+
+1. **Mock SSE Server**: Created TCP listener that sends HTTP SSE response
+   - Manual HTTP/1.1 response with SSE headers
+   - Send events with proper `event:` and `data:` fields
+   - Keep connection open briefly for tests
+
+2. **Timeout Assertions**: Used `tokio::time::timeout()` for event reception
+   - 5 second timeout for normal events
+   - 500ms timeout for deduplication (event should NOT arrive)
+
+3. **Event Matching**: Used loop with `while let Some(event) = rx.recv()` pattern
+   - Skip `Reconnected` events in assertions
+   - Return early on expected event match
+
+### API Surface
+```rust
+impl StreamHandler {
+    pub fn new(client: OpenCodeClient) -> Self
+    pub async fn subscribe(&self, session_id: &str) -> Result<mpsc::Receiver<StreamEvent>>
+    pub fn mark_from_telegram(&self, session_id: &str, text: &str)
+    pub async fn unsubscribe(&self, session_id: &str)
+}
+```
+
+### Test Coverage (19 tests)
+1. `test_new_creates_handler` - Initialization
+2. `test_subscribe_creates_channel` - Subscription setup
+3. `test_parse_message_part_updated_text` - Text chunks
+4. `test_parse_message_part_updated_tool_use` - Tool invocation
+5. `test_parse_message_part_updated_tool_result` - Tool results
+6. `test_parse_message_updated` - Complete message
+7. `test_parse_session_idle` - Session ready
+8. `test_parse_session_error` - Error handling
+9. `test_parse_permission_updated` - Permission request
+10. `test_parse_permission_replied` - Permission reply
+11. `test_message_batching` - 2-second throttle
+12. `test_mark_from_telegram` - Dedup registration
+13. `test_deduplication_skips_telegram_messages` - Echo prevention
+14. `test_unsubscribe_closes_stream` - Cleanup
+15. `test_multiple_concurrent_subscriptions` - Multi-stream
+16. `test_invalid_sse_data_handling` - Graceful degradation
+17. `test_connection_timeout_handling` - Non-responsive server
+18. `test_stream_event_serialization` - Serde roundtrip
+19. `test_opencode_message_serialization` - Message roundtrip
+
+### Gotchas Encountered
+
+1. **tokio::io imports**: Need `AsyncBufReadExt`, `AsyncWriteExt`, `BufReader` for test server
+2. **SSE format**: Must have blank line after data field (`\n\n`)
+3. **Dead code warnings**: Module not used in main.rs yet - added `#![allow(dead_code)]`
+4. **reqwest-eventsource version**: Cargo.toml already had `"0.6"` not `"2"` as task specified
+5. **Mutex for subscriptions**: Used `std::sync::Mutex` not `tokio::sync::Mutex` since operations are quick
+
+### Files Created/Modified
+- `src/opencode/stream_handler.rs` (new, ~1020 lines with tests)
+- `src/opencode/mod.rs` (added stream_handler module export)
+
+### Verification
+```bash
+cargo nextest run -E 'test(stream_handler)'  # 19/19 tests passing
+cargo clippy -p oc-outpost -- -A dead_code -D warnings  # No stream_handler warnings
+```
+
+### Next Steps
+StreamHandler will be used by:
+- Task 14: Message formatting for Telegram display
+- Task 27: Integration layer connecting bot to OpenCode
+- Task 28: Main entry point with SSE subscription on session start
