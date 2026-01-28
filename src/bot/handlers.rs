@@ -7,6 +7,7 @@ pub mod connect;
 pub mod disconnect;
 pub mod link;
 pub mod new;
+pub mod session;
 pub mod sessions;
 pub mod stream;
 
@@ -17,20 +18,11 @@ pub use disconnect::handle_disconnect;
 #[allow(unused_imports)]
 pub use link::handle_link;
 #[allow(unused_imports)]
+pub use session::handle_session;
+#[allow(unused_imports)]
 pub use sessions::handle_sessions;
 #[allow(unused_imports)]
 pub use stream::handle_stream;
-
-#[allow(dead_code)]
-pub async fn handle_session(
-    bot: Bot,
-    msg: Message,
-    cmd: Command,
-    state: Arc<BotState>,
-) -> Result<()> {
-    let _ = (bot, msg, cmd, state);
-    Ok(())
-}
 
 #[allow(dead_code)]
 pub async fn handle_status(

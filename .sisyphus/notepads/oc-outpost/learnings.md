@@ -1773,3 +1773,93 @@ cargo clippy --all-targets               # No warnings for stream module
 - Integrate with bot dispatcher to wire /stream command
 - Implement actual SSE subscription/unsubscription when SSE client available
 - Consider streaming quality options in future enhancement
+
+## Task 21: /session Command Handler (2026-01-29)
+
+### Implementation Summary
+Successfully implemented `/session` command handler for displaying session information:
+- **5 tests** passing (exceeds minimum requirement)
+- Topic validation (rejects General topic)
+- Session info formatting with all fields
+- Graceful handling of missing data
+- Timestamp formatting without external dependencies
+
+### Key Design Decisions
+
+1. **Topic Validation Pattern**: Reused from disconnect/link handlers
+   - Extract `msg.thread_id` and validate it's not General topic (ThreadId(MessageId(1)))
+   - Return clear error: "This command must be used in a forum topic"
+   - Prevents accidental use in General topic
+
+2. **Timestamp Formatting Without chrono**:
+   - Implemented custom Unix timestamp → YYYY-MM-DD HH:MM:SS converter
+   - Avoids adding chrono dependency (not in Cargo.toml)
+   - Handles leap years and month lengths correctly
+   - Produces ISO-8601 format for consistency
+
+3. **Data Retrieval Pattern**:
+   - Get TopicMapping from TopicStore (required)
+   - Get InstanceInfo from OrchestratorStore (optional)
+   - Handle missing instance gracefully with "(not available)" placeholders
+
+4. **Format Output Structure**:
+   ```
+   Session Info
+   
+   Type: Managed
+   Status: Running
+   Port: 4101
+   Session: ses_abc123456
+   Project: /home/user/my-project
+   Streaming: ON
+   Created: 2026-01-29 10:30:00
+   ```
+
+### Test Coverage (5 tests)
+
+1. `test_format_with_all_fields` - All fields present (Managed instance)
+2. `test_format_with_missing_fields` - No instance info available
+3. `test_format_with_partial_fields` - Discovered instance with some fields
+4. `test_timestamp_formatting` - Verify date format (2021-01-01)
+5. `test_format_external_instance` - External instance type
+
+### Patterns That Worked Well
+
+1. **TDD Approach**: Tests written first, implementation followed
+2. **Reuse Existing Patterns**: Topic validation from disconnect.rs
+3. **Graceful Degradation**: Missing data shows "(not available)" instead of panicking
+4. **No External Dependencies**: Custom timestamp formatter avoids chrono dependency
+
+### Gotchas Avoided
+
+1. **Stub Function Conflict**: Removed stub `handle_session()` from handlers.rs before adding module
+2. **Dead Code Warnings**: Added `#[allow(dead_code)]` to helper functions used only in tests
+3. **Timestamp Precision**: Used i64 Unix seconds (not milliseconds) matching TopicMapping schema
+4. **Module Export**: Added `pub mod session;` and `pub use session::handle_session;` to handlers.rs
+
+### API Surface
+
+```rust
+pub async fn handle_session(
+    bot: Bot,
+    msg: Message,
+    _cmd: Command,
+    state: Arc<BotState>,
+) -> Result<()>
+```
+
+### Files Created/Modified
+- `src/bot/handlers/session.rs` (new, ~280 lines with tests)
+- `src/bot/handlers.rs` (added session module and export)
+
+### Verification
+```bash
+cargo nextest run 'bot::handlers::session::tests'  # 5/5 tests passing
+cargo clippy --all-targets --all-features         # No session.rs warnings
+```
+
+### Next Steps
+- Handler ready for dispatcher integration (Task 27)
+- Can be wired into command dispatcher for /session command
+- Follows same pattern as other topic-only commands (disconnect, link)
+

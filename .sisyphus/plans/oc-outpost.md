@@ -1358,7 +1358,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 21. Command: /session
+- [x] 21. Command: /session
 
   **What to do**:
   - Implement `/session` command handler (topic-only)
