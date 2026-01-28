@@ -64,7 +64,7 @@ impl OrchestratorStore {
             .fetch_optional(&self.pool)
             .await?;
 
-        Ok(row.map(|r| self.row_to_instance(r)).transpose()?)
+        row.map(|r| self.row_to_instance(r)).transpose()
     }
 
     pub async fn get_instance_by_port(&self, port: u16) -> Result<Option<InstanceInfo>> {
@@ -73,7 +73,7 @@ impl OrchestratorStore {
             .fetch_optional(&self.pool)
             .await?;
 
-        Ok(row.map(|r| self.row_to_instance(r)).transpose()?)
+        row.map(|r| self.row_to_instance(r)).transpose()
     }
 
     pub async fn get_instance_by_path(&self, path: &str) -> Result<Option<InstanceInfo>> {
@@ -82,7 +82,7 @@ impl OrchestratorStore {
             .fetch_optional(&self.pool)
             .await?;
 
-        Ok(row.map(|r| self.row_to_instance(r)).transpose()?)
+        row.map(|r| self.row_to_instance(r)).transpose()
     }
 
     pub async fn get_all_instances(&self) -> Result<Vec<InstanceInfo>> {
@@ -486,11 +486,9 @@ mod tests {
         let db_path = temp_dir.path().join("test.db");
         let store = OrchestratorStore::new(&db_path).await.unwrap();
 
-        let types = vec![
-            InstanceType::Managed,
+        let types = [InstanceType::Managed,
             InstanceType::Discovered,
-            InstanceType::External,
-        ];
+            InstanceType::External];
 
         for (i, instance_type) in types.iter().enumerate() {
             let mut instance = create_test_instance(
@@ -532,13 +530,11 @@ mod tests {
         let db_path = temp_dir.path().join("test.db");
         let store = OrchestratorStore::new(&db_path).await.unwrap();
 
-        let states = vec![
-            InstanceState::Starting,
+        let states = [InstanceState::Starting,
             InstanceState::Running,
             InstanceState::Stopping,
             InstanceState::Stopped,
-            InstanceState::Error,
-        ];
+            InstanceState::Error];
 
         for (i, state) in states.iter().enumerate() {
             let mut instance = create_test_instance(

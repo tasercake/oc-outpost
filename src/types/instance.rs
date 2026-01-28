@@ -104,7 +104,7 @@ mod tests {
         assert_eq!(config.instance_type, InstanceType::Managed);
         assert_eq!(config.project_path, "/path/to/project");
         assert_eq!(config.port, 3000);
-        assert_eq!(config.auto_start, true);
+        assert!(config.auto_start);
     }
 
     #[test]

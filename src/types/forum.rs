@@ -37,8 +37,8 @@ mod tests {
         assert_eq!(mapping.project_path, "/path/to/project");
         assert_eq!(mapping.session_id, Some("session-123".to_string()));
         assert_eq!(mapping.instance_id, Some("instance-456".to_string()));
-        assert_eq!(mapping.streaming_enabled, true);
-        assert_eq!(mapping.topic_name_updated, false);
+        assert!(mapping.streaming_enabled);
+        assert!(!mapping.topic_name_updated);
         assert_eq!(mapping.created_at, 1640000000);
         assert_eq!(mapping.updated_at, 1640000100);
     }
@@ -60,8 +60,8 @@ mod tests {
         let mapping: TopicMapping = serde_json::from_str(json).unwrap();
         assert_eq!(mapping.session_id, None);
         assert_eq!(mapping.instance_id, None);
-        assert_eq!(mapping.streaming_enabled, false);
-        assert_eq!(mapping.topic_name_updated, true);
+        assert!(!mapping.streaming_enabled);
+        assert!(mapping.topic_name_updated);
     }
 
     #[test]

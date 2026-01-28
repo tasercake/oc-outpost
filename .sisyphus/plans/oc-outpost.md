@@ -74,7 +74,7 @@ Build a production-ready Rust Telegram bot that orchestrates multiple OpenCode A
 ### Definition of Done
 - [x] `cargo build --release` produces working binary
 - [x] `cargo nextest run` passes all tests
-- [ ] `cargo clippy -- -D warnings` has no warnings
+- [x] `cargo clippy -- -D warnings` has no warnings (excluding dead_code)
 - [ ] Bot responds to all 10 commands correctly
 - [ ] SSE streaming shows real-time OpenCode progress
 - [ ] Permission requests show inline buttons

@@ -490,8 +490,7 @@ mod tests {
 
         let result = OpenCodeInstance::spawn(config, 4300).await;
 
-        if result.is_err() {
-            let err = result.unwrap_err();
+        if let Err(err) = result {
             assert!(err.to_string().contains("Failed to spawn"));
         }
     }

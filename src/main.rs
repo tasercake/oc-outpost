@@ -10,8 +10,13 @@ mod telegram;
 mod types;
 
 use anyhow::Result;
-use bot::BotState;
+use bot::{
+    handle_clear, handle_connect, handle_disconnect, handle_help, handle_link, handle_new,
+    handle_session, handle_sessions, handle_status, handle_stream,
+};
+use bot::{BotState, Command};
 use config::Config;
+use dptree::case;
 
 use forum::TopicStore;
 use integration::Integration;
@@ -70,18 +75,143 @@ async fn main() -> Result<()> {
 
     let integration = Arc::new(Integration::new(bot_state.clone(), stream_handler));
 
-    let handler = Update::filter_message().endpoint({
-        let integration = Arc::clone(&integration);
-        move |bot: Bot, msg: Message| {
+    let handler = dptree::entry()
+        .branch(
+            Update::filter_message()
+                .filter_command::<Command>()
+                .branch(case![Command::New(name)].endpoint({
+                    let state = Arc::clone(&bot_state);
+                    move |bot: Bot, msg: Message, cmd: Command| {
+                        let state = Arc::clone(&state);
+                        async move {
+                            if let Err(e) = handle_new(bot, msg, cmd, state).await {
+                                error!("Error handling /new: {:?}", e);
+                            }
+                            respond(())
+                        }
+                    }
+                }))
+                .branch(case![Command::Sessions].endpoint({
+                    let state = Arc::clone(&bot_state);
+                    move |bot: Bot, msg: Message, cmd: Command| {
+                        let state = Arc::clone(&state);
+                        async move {
+                            if let Err(e) = handle_sessions(bot, msg, cmd, state).await {
+                                error!("Error handling /sessions: {:?}", e);
+                            }
+                            respond(())
+                        }
+                    }
+                }))
+                .branch(case![Command::Connect(id)].endpoint({
+                    let state = Arc::clone(&bot_state);
+                    move |bot: Bot, msg: Message, cmd: Command| {
+                        let state = Arc::clone(&state);
+                        async move {
+                            if let Err(e) = handle_connect(bot, msg, cmd, state).await {
+                                error!("Error handling /connect: {:?}", e);
+                            }
+                            respond(())
+                        }
+                    }
+                }))
+                .branch(case![Command::Disconnect].endpoint({
+                    let state = Arc::clone(&bot_state);
+                    move |bot: Bot, msg: Message, cmd: Command| {
+                        let state = Arc::clone(&state);
+                        async move {
+                            if let Err(e) = handle_disconnect(bot, msg, cmd, state).await {
+                                error!("Error handling /disconnect: {:?}", e);
+                            }
+                            respond(())
+                        }
+                    }
+                }))
+                .branch(case![Command::Link(path)].endpoint({
+                    let state = Arc::clone(&bot_state);
+                    move |bot: Bot, msg: Message, cmd: Command| {
+                        let state = Arc::clone(&state);
+                        async move {
+                            if let Err(e) = handle_link(bot, msg, cmd, state).await {
+                                error!("Error handling /link: {:?}", e);
+                            }
+                            respond(())
+                        }
+                    }
+                }))
+                .branch(case![Command::Stream].endpoint({
+                    let state = Arc::clone(&bot_state);
+                    move |bot: Bot, msg: Message, cmd: Command| {
+                        let state = Arc::clone(&state);
+                        async move {
+                            if let Err(e) = handle_stream(bot, msg, cmd, state).await {
+                                error!("Error handling /stream: {:?}", e);
+                            }
+                            respond(())
+                        }
+                    }
+                }))
+                .branch(case![Command::Session].endpoint({
+                    let state = Arc::clone(&bot_state);
+                    move |bot: Bot, msg: Message, cmd: Command| {
+                        let state = Arc::clone(&state);
+                        async move {
+                            if let Err(e) = handle_session(bot, msg, cmd, state).await {
+                                error!("Error handling /session: {:?}", e);
+                            }
+                            respond(())
+                        }
+                    }
+                }))
+                .branch(case![Command::Status].endpoint({
+                    let state = Arc::clone(&bot_state);
+                    move |bot: Bot, msg: Message, cmd: Command| {
+                        let state = Arc::clone(&state);
+                        async move {
+                            if let Err(e) = handle_status(bot, msg, cmd, state).await {
+                                error!("Error handling /status: {:?}", e);
+                            }
+                            respond(())
+                        }
+                    }
+                }))
+                .branch(case![Command::Clear].endpoint({
+                    let state = Arc::clone(&bot_state);
+                    move |bot: Bot, msg: Message, cmd: Command| {
+                        let state = Arc::clone(&state);
+                        async move {
+                            if let Err(e) = handle_clear(bot, msg, cmd, state).await {
+                                error!("Error handling /clear: {:?}", e);
+                            }
+                            respond(())
+                        }
+                    }
+                }))
+                .branch(case![Command::Help].endpoint({
+                    let state = Arc::clone(&bot_state);
+                    move |bot: Bot, msg: Message, cmd: Command| {
+                        let state = Arc::clone(&state);
+                        async move {
+                            if let Err(e) = handle_help(bot, msg, cmd, state).await {
+                                error!("Error handling /help: {:?}", e);
+                            }
+                            respond(())
+                        }
+                    }
+                })),
+        )
+        .branch(Update::filter_message().endpoint({
             let integration = Arc::clone(&integration);
-            async move {
-                if let Err(e) = integration.handle_message(bot, msg).await {
-                    error!("Error handling message: {:?}", e);
+            move |bot: Bot, msg: Message| {
+                let integration = Arc::clone(&integration);
+                async move {
+                    if let Err(e) = integration.handle_message(bot, msg).await {
+                        error!("Error handling message: {:?}", e);
+                    }
+                    respond(())
                 }
-                respond(())
             }
-        }
-    });
+        }));
 
     let mut dispatcher = Dispatcher::builder(bot.clone(), handler)
         .dependencies(dptree::deps![bot_state])

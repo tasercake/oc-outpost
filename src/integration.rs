@@ -544,7 +544,7 @@ mod tests {
     #[tokio::test]
     async fn test_route_message_no_mapping() {
         let (state, stream_handler, _temp_dir) = create_test_state().await;
-        let integration = Integration::new(state.clone(), stream_handler);
+        let _integration = Integration::new(state.clone(), stream_handler);
 
         // Create mock message (this would need teloxide test utilities)
         // For now, we test the underlying logic indirectly
@@ -564,7 +564,7 @@ mod tests {
             topic_store.save_mapping(&mapping).await.unwrap();
         }
 
-        let integration = Integration::new(state.clone(), stream_handler);
+        let _integration = Integration::new(state.clone(), stream_handler);
 
         // Verify mapping exists
         let stored = {

@@ -265,9 +265,9 @@ mod tests {
             PathBuf::from("./data/orchestrator.db")
         );
         assert_eq!(config.topic_db_path, PathBuf::from("./data/topics.db"));
-        assert_eq!(config.auto_create_project_dirs, true);
+        assert!(config.auto_create_project_dirs);
         assert_eq!(config.api_port, 4200);
-        assert_eq!(config.handle_general_topic, true);
+        assert!(config.handle_general_topic);
         assert!(config.telegram_allowed_users.is_empty());
         assert!(config.api_key.is_none());
     }
@@ -303,7 +303,7 @@ mod tests {
         let config = Config::from_env().expect("Config should expand paths");
 
         assert!(!config.project_base_path.to_string_lossy().contains("~"));
-        assert!(config.project_base_path.to_string_lossy().len() > 0);
+        assert!(!config.project_base_path.to_string_lossy().is_empty());
     }
 
     #[test]
@@ -432,7 +432,7 @@ mod tests {
         );
         assert_eq!(config.telegram_chat_id, -1001234567890);
         assert_eq!(config.telegram_allowed_users, vec![111, 222, 333]);
-        assert_eq!(config.handle_general_topic, true);
+        assert!(config.handle_general_topic);
         assert_eq!(
             config.opencode_path,
             PathBuf::from("/usr/local/bin/opencode")
@@ -454,7 +454,7 @@ mod tests {
             PathBuf::from("./custom/orchestrator.db")
         );
         assert_eq!(config.topic_db_path, PathBuf::from("./custom/topics.db"));
-        assert_eq!(config.auto_create_project_dirs, false);
+        assert!(!config.auto_create_project_dirs);
         assert_eq!(config.api_port, 8080);
         assert_eq!(config.api_key, Some("my-secret-key".to_string()));
     }

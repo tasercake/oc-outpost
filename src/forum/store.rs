@@ -419,18 +419,18 @@ mod tests {
 
         // Toggle to false
         let new_value = store.toggle_streaming(666).await.unwrap();
-        assert_eq!(new_value, false);
+        assert!(!new_value);
 
         // Verify it was persisted
         let retrieved = store.get_mapping(666).await.unwrap().unwrap();
-        assert_eq!(retrieved.streaming_enabled, false);
+        assert!(!retrieved.streaming_enabled);
 
         // Toggle back to true
         let new_value = store.toggle_streaming(666).await.unwrap();
-        assert_eq!(new_value, true);
+        assert!(new_value);
 
         let retrieved = store.get_mapping(666).await.unwrap().unwrap();
-        assert_eq!(retrieved.streaming_enabled, true);
+        assert!(retrieved.streaming_enabled);
     }
 
     #[tokio::test]
@@ -456,7 +456,7 @@ mod tests {
         store.mark_topic_name_updated(777).await.unwrap();
 
         let retrieved = store.get_mapping(777).await.unwrap().unwrap();
-        assert_eq!(retrieved.topic_name_updated, true);
+        assert!(retrieved.topic_name_updated);
     }
 
     #[tokio::test]
@@ -576,7 +576,7 @@ mod tests {
         store.save_mapping(&mapping).await.unwrap();
 
         let retrieved = store.get_mapping(555).await.unwrap().unwrap();
-        assert_eq!(retrieved.streaming_enabled, false);
-        assert_eq!(retrieved.topic_name_updated, true);
+        assert!(!retrieved.streaming_enabled);
+        assert!(retrieved.topic_name_updated);
     }
 }

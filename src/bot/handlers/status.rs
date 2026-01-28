@@ -45,7 +45,7 @@ fn format_status_output(
     ));
     output.push_str(&format!("Discovered Sessions: {}\n", discovered_count));
     output.push_str(&format!("External Instances: {}\n", external_count));
-    output.push_str("\n");
+    output.push('\n');
     output.push_str(&format!("Port Pool: {}/{} used\n", port_used, port_total));
     output.push_str(&format!("Uptime: {}\n", format_uptime(uptime_seconds)));
     output.push_str("Health: Healthy\n");

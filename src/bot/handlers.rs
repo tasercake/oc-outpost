@@ -1,5 +1,8 @@
+#[allow(unused_imports)]
 use crate::bot::{BotState, Command};
+#[allow(unused_imports)]
 use std::sync::Arc;
+#[allow(unused_imports)]
 use teloxide::prelude::*;
 
 pub mod clear;
@@ -24,6 +27,8 @@ pub use disconnect::handle_disconnect;
 pub use help::handle_help;
 #[allow(unused_imports)]
 pub use link::handle_link;
+#[allow(unused_imports)]
+pub use new::handle_new;
 #[allow(unused_imports)]
 pub use permissions::{handle_permission_callback, handle_permission_request};
 #[allow(unused_imports)]

@@ -35,10 +35,9 @@ fn validate_project_name(name: &str) -> Result<()> {
 #[allow(dead_code)]
 fn is_general_topic(msg: &Message) -> bool {
     msg.thread_id.is_none()
-        || msg
+        || (msg
             .thread_id
-            .map(|id| id.0)
-            .map_or(false, |raw_id| raw_id == teloxide::types::MessageId(1))
+            .map(|id| id.0) == Some(teloxide::types::MessageId(1)))
 }
 
 /// Handle /new command - create new project and session
