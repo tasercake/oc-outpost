@@ -1120,7 +1120,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 16. Command: /sessions
+- [x] 16. Command: /sessions
 
   **What to do**:
   - Implement `/sessions` command handler

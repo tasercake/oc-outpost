@@ -1429,3 +1429,59 @@ if in_tag {
 - `src/bot/handlers/new.rs` (new file, 220 lines)
 - `src/bot/handlers.rs` (added module declaration)
 
+
+## Task 16: /sessions Command Handler
+
+**Date**: 2026-01-29
+
+### Implementation Summary
+- Created `src/bot/handlers/sessions.rs` with `/sessions` command handler
+- Lists managed instances from OrchestratorStore and discovered instances from Discovery
+- Implemented pagination (max 10 sessions per page)
+- 8 unit tests covering all scenarios
+
+### Key Decisions
+1. **Data Source for Managed Sessions**: Used `OrchestratorStore::get_all_instances()` instead of accessing InstanceManager directly, as BotState doesn't expose InstanceManager
+2. **Session ID Display**: Used instance ID as session_id since `row_to_instance()` doesn't extract session_id from database
+3. **State Filtering**: Only show Running/Starting instances for managed sessions
+4. **Error Handling**: Convert anyhow::Error and teloxide::RequestError to OutpostError using map_err
+
+### Technical Patterns
+- **TDD Approach**: Wrote 8 tests first (RED), then implemented (GREEN), then cleaned up (REFACTOR)
+- **Error Conversion**: Used `map_err` to convert external errors to OutpostError
+- **Pagination**: Simple "... and N more" indicator when >10 sessions
+- **Project Name Extraction**: Used `Path::file_name()` to extract project name from path
+
+### Gotchas
+1. **Module Privacy**: `opencode::discovery` is private, must use public re-exports from `opencode` module
+2. **BotState Structure**: BotState has `orchestrator_store`, `topic_store`, `config` - no direct InstanceManager access
+3. **Database Schema**: OrchestratorStore saves session_id but doesn't retrieve it in `row_to_instance()`
+4. **Error Types**: OutpostError doesn't implement From<anyhow::Error> or From<RequestError>, must use map_err
+
+### Test Coverage
+- `test_format_empty_list`: Empty session list
+- `test_format_single_managed`: Single managed instance
+- `test_format_single_discovered`: Single discovered instance
+- `test_format_multiple_instances`: Multiple managed instances
+- `test_format_mixed_types`: Mixed managed and discovered
+- `test_pagination_many_instances`: Pagination with 15 instances
+- `test_extract_project_name`: Project name extraction
+- `test_discovered_without_port`: Discovered instance without port
+
+### Clippy Fixes
+- Changed `output.push_str("\n")` to `output.push('\n')`
+- Changed `format!("{}", info.id)` to `info.id.to_string()`
+
+### Files Modified
+- Created: `src/bot/handlers/sessions.rs` (169 lines)
+- Modified: `src/bot/handlers.rs` (added `pub mod sessions;` and `pub use sessions::handle_sessions;`)
+
+### Verification
+```bash
+cargo nextest run -E 'test(sessions)'  # 11 tests passed (8 in sessions module)
+cargo clippy --all-targets             # No warnings in sessions.rs
+```
+
+### Next Steps
+- Task 17: Implement session_id retrieval in OrchestratorStore if needed
+- Consider adding filtering options (by state, by type) in future iterations

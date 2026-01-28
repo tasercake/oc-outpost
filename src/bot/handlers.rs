@@ -4,17 +4,9 @@ use std::sync::Arc;
 use teloxide::prelude::*;
 
 pub mod new;
+pub mod sessions;
 
-#[allow(dead_code)]
-pub async fn handle_sessions(
-    bot: Bot,
-    msg: Message,
-    cmd: Command,
-    state: Arc<BotState>,
-) -> Result<()> {
-    let _ = (bot, msg, cmd, state);
-    Ok(())
-}
+pub use sessions::handle_sessions;
 
 #[allow(dead_code)]
 pub async fn handle_connect(
