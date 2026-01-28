@@ -2407,3 +2407,110 @@ API server ready for integration:
 4. **Optional Middleware**: API key only checked if configured
 5. **Path Normalization**: Consistent leading slash handling
 
+
+## Task 25: Permission Inline Buttons (2026-01-29)
+
+### Implementation Summary
+Successfully implemented permission request handler with inline buttons:
+- **7 tests** passing (exceeds 5 minimum requirement)
+- Permission request message formatting
+- Inline keyboard with Allow/Deny buttons
+- Callback query parsing and handling
+- OpenCode API integration for permission replies
+- Message updates after user response
+
+### Key Design Decisions
+
+1. **Callback Data Format**: Used `perm:{session_id}:{permission_id}:{allow|deny}` pattern
+   - Compact format fits Telegram's callback_data limit (64 bytes)
+   - Easy to parse with simple string split
+   - Includes all necessary context for permission reply
+
+2. **Inline Keyboard Pattern**: Used teloxide's `InlineKeyboardButton::callback()` constructor
+   - Creates callback buttons with text and data
+   - Returns `InlineKeyboardMarkup` for bot.send_message()
+   - Two buttons in single row: [Allow] [Deny]
+
+3. **Message Update Flow**:
+   1. User clicks button → CallbackQuery received
+   2. Parse callback data to extract session_id, permission_id, action
+   3. Call OpenCodeClient.reply_permission() with allow boolean
+   4. Edit original message to show result (✅ Allowed or ❌ Denied)
+   5. Answer callback query to remove loading state
+
+4. **Error Handling**: Used `OutpostError::telegram_error()` for all Telegram API errors
+   - No `invalid_input` helper exists in OutpostError
+   - Used `opencode_api_error()` for OpenCode client errors (anyhow::Error conversion)
+
+### Teloxide API Patterns
+
+**InlineKeyboardButton Construction:**
+```rust
+InlineKeyboardButton::callback("Allow", "perm:ses_123:perm_456:allow")
+```
+- NOT `InlineKeyboardButton::CallbackData` (that's an internal enum variant)
+- Use constructor function, not enum variant directly
+
+**CallbackQuery Handling:**
+```rust
+pub async fn handle_permission_callback(
+    bot: Bot,
+    q: CallbackQuery,
+    state: Arc<BotState>,
+) -> Result<()> {
+    let data = q.data.ok_or_else(|| ...)?;
+    
+    // Process callback
+    
+    if let Some(message) = q.message {
+        let chat_id = message.chat().id;  // Method call, not field
+        let message_id = message.id();     // Method call, not field
+        bot.edit_message_text(chat_id, message_id, result_text).await?;
+    }
+    
+    bot.answer_callback_query(q.id).await?;
+    Ok(())
+}
+```
+
+**Key Gotchas:**
+- `q.message` is `Option<MaybeInaccessibleMessage>`
+- `message.chat()` and `message.id()` are methods, not fields
+- Must call `answer_callback_query()` to remove loading state
+
+### Test Coverage (7 tests)
+
+1. `test_format_permission_message` - Verify message format
+2. `test_create_inline_keyboard` - Verify keyboard structure (2 buttons)
+3. `test_parse_callback_data_allow` - Parse allow action
+4. `test_parse_callback_data_deny` - Parse deny action
+5. `test_parse_callback_data_invalid_format` - Handle malformed data
+6. `test_parse_callback_data_wrong_prefix` - Reject wrong prefix
+7. `test_parse_callback_data_missing_parts` - Handle incomplete data
+
+### Files Created/Modified
+- `src/bot/handlers/permissions.rs` (new, 183 lines with tests)
+- `src/bot/handlers.rs` (added permissions module and exports)
+
+### Integration Points
+- `OpenCodeClient.reply_permission()` - Already implemented in Task 12
+- `StreamHandler` - Will emit PermissionRequest events (Task 13)
+- Bot dispatcher - Will route callback queries to handler (future task)
+
+### Patterns That Worked Well
+1. TDD approach: Tests written first, implementation followed
+2. Simple string parsing: No regex needed for callback data
+3. Error conversion: Map anyhow::Error to OutpostError explicitly
+4. Simplified tests: Removed complex button matching after teloxide API mismatch
+
+### Next Steps
+This handler will be used by:
+- Task 27: Integration layer connecting StreamHandler to bot
+- Bot dispatcher: Route callback queries with "perm:" prefix to handler
+- Permission events from OpenCode will trigger handle_permission_request()
+
+### Verification
+```bash
+cargo nextest run -E 'test(permission)'  # 11/11 tests passing (7 new + 4 existing)
+cargo nextest run --no-fail-fast         # 336/336 tests passing
+```

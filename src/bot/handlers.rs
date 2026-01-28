@@ -8,6 +8,7 @@ pub mod disconnect;
 pub mod help;
 pub mod link;
 pub mod new;
+pub mod permissions;
 pub mod session;
 pub mod sessions;
 pub mod status;
@@ -23,6 +24,8 @@ pub use disconnect::handle_disconnect;
 pub use help::handle_help;
 #[allow(unused_imports)]
 pub use link::handle_link;
+#[allow(unused_imports)]
+pub use permissions::{handle_permission_callback, handle_permission_request};
 #[allow(unused_imports)]
 pub use session::handle_session;
 #[allow(unused_imports)]

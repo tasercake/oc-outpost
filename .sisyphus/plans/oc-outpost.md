@@ -1570,7 +1570,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 25. Permission Inline Buttons
+- [x] 25. Permission Inline Buttons
 
   **What to do**:
   - Create `src/bot/handlers/permissions.rs`
