@@ -1223,7 +1223,7 @@ Wave 5 (API & Integration - After Wave 4):
 
 ---
 
-- [ ] 18. Command: /disconnect
+- [x] 18. Command: /disconnect
 
   **What to do**:
   - Implement `/disconnect` command handler (topic-only)
