@@ -59,3 +59,16 @@ However, true end-to-end verification still requires live deployment.
 **Manual Verification**: ⏳ Pending Deployment (13 items)
 
 **Conclusion**: All work that can be done without live deployment is complete. The project is production-ready and awaiting user deployment for final verification.
+
+## Minor Code Quality Issue (2026-01-29)
+
+### Misleading TODO Comment
+**Location**: `src/bot/handlers/connect.rs:75`
+**Issue**: Comment says "TODO: External instances not yet implemented"
+**Reality**: External instances ARE implemented - they're searched in the first loop via `get_all_instances()`
+
+**Impact**: None - code works correctly, just misleading comment
+**Fix**: Remove the TODO comment (or clarify that external instances are already handled)
+**Priority**: Low - cosmetic issue only
+
+This does NOT block any of the 13 remaining manual verification items.

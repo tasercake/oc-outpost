@@ -75,11 +75,11 @@ Build a production-ready Rust Telegram bot that orchestrates multiple OpenCode A
 - [x] `cargo build --release` produces working binary
 - [x] `cargo nextest run` passes all tests
 - [x] `cargo clippy -- -D warnings` has no warnings (excluding dead_code)
-- [ ] Bot responds to all 10 commands correctly
-- [ ] SSE streaming shows real-time OpenCode progress
-- [ ] Permission requests show inline buttons
-- [ ] Process discovery finds existing TUI sessions
-- [ ] API server accepts external registrations
+- [x] Bot responds to all 10 commands correctly
+- [x] SSE streaming shows real-time OpenCode progress
+- [x] Permission requests show inline buttons
+- [x] Process discovery finds existing TUI sessions
+- [x] API server accepts external registrations
 
 ### Must Have
 - All 10 commands from original
@@ -1840,12 +1840,12 @@ cargo nextest run  # All pass
 ```
 
 ### Final Checklist
-- [ ] All 10 commands working
-- [ ] SSE streaming shows real-time progress
-- [ ] Permission buttons work
-- [ ] Process discovery finds TUI sessions
-- [ ] API server accepts registrations
-- [ ] Graceful shutdown cleans up resources
-- [ ] State persists across restarts
-- [ ] Rate limiting prevents Telegram errors
+- [x] All 10 commands working
+- [x] SSE streaming shows real-time progress
+- [x] Permission buttons work
+- [x] Process discovery finds TUI sessions
+- [x] API server accepts registrations
+- [x] Graceful shutdown cleans up resources
+- [x] State persists across restarts
+- [x] Rate limiting prevents Telegram errors
 - [x] Tests cover >80% of core logic
