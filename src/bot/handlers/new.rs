@@ -1,13 +1,15 @@
 use crate::bot::{BotState, Command};
 use crate::types::error::{OutpostError, Result};
+use crate::types::forum::TopicMapping;
+use crate::types::instance::{InstanceInfo, InstanceState, InstanceType};
 use std::sync::Arc;
 use teloxide::prelude::*;
+use uuid::Uuid;
 
 /// Validate project name according to rules:
 /// - Length: 1-50 characters
 /// - Allowed: alphanumeric, dash, underscore
 /// - No special chars, no spaces
-#[allow(dead_code)]
 fn validate_project_name(name: &str) -> Result<()> {
     if name.is_empty() {
         return Err(OutpostError::config_error("Project name cannot be empty"));
@@ -32,7 +34,6 @@ fn validate_project_name(name: &str) -> Result<()> {
 }
 
 /// Check if message is in General topic (thread_id is None or ThreadId(MessageId(1)))
-#[allow(dead_code)]
 fn is_general_topic(msg: &Message) -> bool {
     msg.thread_id.is_none() || (msg.thread_id.map(|id| id.0) == Some(teloxide::types::MessageId(1)))
 }
@@ -47,7 +48,6 @@ fn is_general_topic(msg: &Message) -> bool {
 /// 5. Spawn OpenCode instance via InstanceManager
 /// 6. Create topic mapping in TopicStore
 /// 7. Send confirmation message
-#[allow(dead_code)]
 pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotState>) -> Result<()> {
     // Extract project name from command
     let name = match cmd {
@@ -69,7 +69,6 @@ pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotStat
         return Ok(());
     }
 
-    let _chat_id = msg.chat.id.0;
     let project_path = state.config.project_base_path.join(&name);
 
     // Check if directory already exists
@@ -94,16 +93,80 @@ pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotStat
         })?;
     }
 
-    // Send success message (simplified - full implementation would create topic and instance)
-    let message = format!(
-        "✅ Project '{}' validated successfully\n\n\
-        📁 Path: {}\n\n\
-        (Full implementation will create forum topic and spawn OpenCode instance)",
-        name,
-        project_path.display()
-    );
+    // Create forum topic
+    let forum_topic = match bot.create_forum_topic(msg.chat.id, &name).await {
+        Ok(topic) => topic,
+        Err(e) => {
+            bot.send_message(msg.chat.id, format!("Failed to create forum topic: {}", e))
+                .await
+                .map_err(|e| OutpostError::telegram_error(e.to_string()))?;
+            return Err(OutpostError::telegram_error(format!(
+                "Failed to create forum topic: {}",
+                e
+            )));
+        }
+    };
 
-    bot.send_message(msg.chat.id, message)
+    // Generate instance ID
+    let instance_id = Uuid::new_v4().to_string();
+
+    // Get timestamp
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| OutpostError::io_error(e.to_string()))?
+        .as_secs() as i64;
+
+    // Create and save InstanceInfo
+    let instance = InstanceInfo {
+        id: instance_id.clone(),
+        project_path: project_path.to_string_lossy().to_string(),
+        port: state.config.opencode_port_start,
+        state: InstanceState::Starting,
+        instance_type: InstanceType::Managed,
+        pid: None,
+        started_at: Some(now),
+        stopped_at: None,
+    };
+    let store = state.orchestrator_store.lock().await;
+    store
+        .save_instance(&instance, None)
+        .await
+        .map_err(|e| OutpostError::database_error(e.to_string()))?;
+    drop(store);
+
+    // Create and save TopicMapping
+    let mapping = TopicMapping {
+        topic_id: forum_topic.thread_id.0 .0,
+        chat_id: msg.chat.id.0,
+        project_path: project_path.to_string_lossy().to_string(),
+        session_id: None,
+        instance_id: Some(instance_id.clone()),
+        streaming_enabled: false,
+        topic_name_updated: false,
+        created_at: now,
+        updated_at: now,
+    };
+    let topic_store = state.topic_store.lock().await;
+    topic_store
+        .save_mapping(&mapping)
+        .await
+        .map_err(|e| OutpostError::database_error(e.to_string()))?;
+    drop(topic_store);
+
+    // Send confirmation to the new topic
+    let confirmation = format!(
+        "🚀 Project '{}' created!\n\n\
+         📁 Path: {}\n\
+         🆔 Instance: {}\n\n\
+         Send a message here to start your OpenCode session.",
+        name,
+        project_path.display(),
+        instance_id
+    );
+    bot.send_message(msg.chat.id, confirmation)
+        .message_thread_id(teloxide::types::ThreadId(teloxide::types::MessageId(
+            forum_topic.thread_id.0 .0,
+        )))
         .await
         .map_err(|e| OutpostError::telegram_error(e.to_string()))?;
 
