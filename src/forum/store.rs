@@ -5,19 +5,16 @@ use sqlx::{Row, SqlitePool};
 use std::path::Path;
 use std::time::Duration;
 
-#[allow(dead_code)]
 pub struct TopicStore {
     pool: SqlitePool,
 }
 
 impl TopicStore {
-    #[allow(dead_code)]
     pub async fn new(db_path: &Path) -> Result<Self> {
         let pool = init_topics_db(db_path).await?;
         Ok(Self { pool })
     }
 
-    #[allow(dead_code)]
     pub async fn save_mapping(&self, mapping: &TopicMapping) -> Result<()> {
         sqlx::query(
             "INSERT INTO topic_mappings 
@@ -48,7 +45,6 @@ impl TopicStore {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub async fn get_mapping(&self, topic_id: i32) -> Result<Option<TopicMapping>> {
         let row = sqlx::query(
             "SELECT topic_id, chat_id, project_path, session_id, instance_id,
@@ -75,7 +71,6 @@ impl TopicStore {
         }
     }
 
-    #[allow(dead_code)]
     pub async fn get_mappings_by_chat(&self, chat_id: i64) -> Result<Vec<TopicMapping>> {
         let rows = sqlx::query(
             "SELECT topic_id, chat_id, project_path, session_id, instance_id,
@@ -104,7 +99,6 @@ impl TopicStore {
         Ok(mappings)
     }
 
-    #[allow(dead_code)]
     pub async fn get_mapping_by_session(&self, session_id: &str) -> Result<Option<TopicMapping>> {
         let row = sqlx::query(
             "SELECT topic_id, chat_id, project_path, session_id, instance_id,
@@ -131,7 +125,6 @@ impl TopicStore {
         }
     }
 
-    #[allow(dead_code)]
     pub async fn update_session(&self, topic_id: i32, session_id: &str) -> Result<()> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
@@ -153,7 +146,6 @@ impl TopicStore {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub async fn toggle_streaming(&self, topic_id: i32) -> Result<bool> {
         let current = self
             .get_mapping(topic_id)
@@ -177,7 +169,6 @@ impl TopicStore {
         Ok(new_value)
     }
 
-    #[allow(dead_code)]
     pub async fn mark_topic_name_updated(&self, topic_id: i32) -> Result<()> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
@@ -198,7 +189,6 @@ impl TopicStore {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub async fn delete_mapping(&self, topic_id: i32) -> Result<()> {
         sqlx::query("DELETE FROM topic_mappings WHERE topic_id = ?")
             .bind(topic_id)
@@ -208,7 +198,6 @@ impl TopicStore {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub async fn get_stale_mappings(&self, older_than: Duration) -> Result<Vec<TopicMapping>> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?

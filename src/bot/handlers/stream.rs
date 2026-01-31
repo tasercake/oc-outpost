@@ -5,7 +5,6 @@ use teloxide::prelude::*;
 use teloxide::types::{MessageId, ThreadId};
 
 /// Extract topic_id from message, ensuring it's not the General topic
-#[allow(dead_code)]
 fn get_topic_id(msg: &Message) -> Result<i32> {
     let thread_id = msg.thread_id.ok_or_else(|| {
         OutpostError::telegram_error("This command must be used in a forum topic")
@@ -30,7 +29,6 @@ fn format_confirmation(enabled: bool) -> String {
     }
 }
 
-#[allow(dead_code)]
 pub async fn handle_stream(
     bot: Bot,
     msg: Message,

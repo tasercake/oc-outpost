@@ -45,7 +45,6 @@ impl Default for RateLimitState {
 }
 
 /// Integration layer coordinator
-#[allow(dead_code)]
 pub struct Integration {
     state: Arc<BotState>,
     stream_handler: Arc<StreamHandler>,
@@ -55,7 +54,6 @@ pub struct Integration {
 
 impl Integration {
     /// Create a new integration coordinator
-    #[allow(dead_code)]
     pub fn new(state: Arc<BotState>, stream_handler: Arc<StreamHandler>) -> Self {
         Self {
             state,
@@ -75,7 +73,6 @@ impl Integration {
     /// 5. Mark message as from Telegram (dedup)
     /// 6. Send to OpenCode async
     /// 7. If streaming enabled, subscribe to SSE
-    #[allow(dead_code)]
     pub async fn handle_message(&self, bot: Bot, msg: Message) -> Result<()> {
         // 1. Extract text from message
         let text = msg
@@ -446,7 +443,6 @@ impl Integration {
     }
 
     /// Stop stream forwarding for a topic
-    #[allow(dead_code)]
     pub async fn stop_stream(&self, topic_id: i32) {
         let handle = {
             let mut streams = self.active_streams.lock().await;
@@ -460,7 +456,6 @@ impl Integration {
     }
 
     /// Stop all active streams
-    #[allow(dead_code)]
     pub async fn stop_all_streams(&self) {
         let handles: Vec<_> = {
             let mut streams = self.active_streams.lock().await;
@@ -474,7 +469,6 @@ impl Integration {
     }
 
     /// Get count of active streams
-    #[allow(dead_code)]
     pub async fn active_stream_count(&self) -> usize {
         self.active_streams.lock().await.len()
     }

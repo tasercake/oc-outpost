@@ -4,7 +4,6 @@ use std::time::Duration;
 
 /// Configuration for oc-outpost loaded from environment variables
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct Config {
     // Telegram (4 fields)
     pub telegram_bot_token: String,
@@ -36,7 +35,6 @@ pub struct Config {
 
 impl Config {
     /// Load configuration from environment variables
-    #[allow(dead_code)]
     pub fn from_env() -> Result<Self> {
         dotenvy::dotenv().ok();
 

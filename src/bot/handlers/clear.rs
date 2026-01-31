@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use teloxide::prelude::*;
 
-#[allow(dead_code)]
 pub async fn handle_clear(
     bot: Bot,
     msg: Message,

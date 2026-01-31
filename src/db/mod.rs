@@ -6,7 +6,6 @@ use sqlx::sqlite::SqlitePool;
 use std::path::Path;
 
 /// Initialize the orchestrator database with instances table
-#[allow(dead_code)]
 pub async fn init_orchestrator_db(db_path: &Path) -> Result<SqlitePool> {
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -25,7 +24,6 @@ pub async fn init_orchestrator_db(db_path: &Path) -> Result<SqlitePool> {
 }
 
 /// Initialize the topics database with topic_mappings table
-#[allow(dead_code)]
 pub async fn init_topics_db(db_path: &Path) -> Result<SqlitePool> {
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;

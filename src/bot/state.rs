@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
 
-#[allow(dead_code)]
 pub struct BotState {
     pub orchestrator_store: Arc<Mutex<OrchestratorStore>>,
     pub topic_store: Arc<Mutex<TopicStore>>,
@@ -16,7 +15,6 @@ pub struct BotState {
 }
 
 impl BotState {
-    #[allow(dead_code)]
     pub fn new(
         orchestrator_store: OrchestratorStore,
         topic_store: TopicStore,

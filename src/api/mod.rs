@@ -15,7 +15,6 @@ use tower_http::cors::CorsLayer;
 
 /// Application state shared across handlers
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct AppState {
     pub store: OrchestratorStore,
     pub api_key: Option<String>,
@@ -24,7 +23,6 @@ pub struct AppState {
 /// Request payload for registering an external instance
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 pub struct RegisterRequest {
     pub project_path: String,
     pub port: u16,
@@ -34,14 +32,12 @@ pub struct RegisterRequest {
 /// Request payload for unregistering an instance
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 pub struct UnregisterRequest {
     pub project_path: String,
 }
 
 /// Response for status endpoint
 #[derive(Debug, Serialize)]
-#[allow(dead_code)]
 pub struct StatusResponse {
     pub registered: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -50,19 +46,16 @@ pub struct StatusResponse {
 
 /// Response for instances list endpoint
 #[derive(Debug, Serialize)]
-#[allow(dead_code)]
 pub struct InstancesResponse {
     pub instances: Vec<InstanceInfo>,
 }
 
 /// Health check handler
-#[allow(dead_code)]
 async fn health() -> impl IntoResponse {
     StatusCode::OK
 }
 
 /// Register external instance handler
-#[allow(dead_code)]
 async fn register(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<RegisterRequest>,
@@ -98,7 +91,6 @@ async fn register(
 }
 
 /// Unregister instance handler
-#[allow(dead_code)]
 async fn unregister(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<UnregisterRequest>,
@@ -126,7 +118,6 @@ async fn unregister(
 }
 
 /// Check registration status handler
-#[allow(dead_code)]
 async fn status(
     State(state): State<Arc<AppState>>,
     Path(mut path): Path<String>,
@@ -160,7 +151,6 @@ async fn status(
 }
 
 /// List all external instances handler
-#[allow(dead_code)]
 async fn list_instances(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match state.store.get_all_instances().await {
         Ok(instances) => {
@@ -186,7 +176,6 @@ async fn list_instances(State(state): State<Arc<AppState>>) -> impl IntoResponse
 }
 
 /// API key authentication middleware
-#[allow(dead_code)]
 async fn api_key_middleware(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -209,7 +198,6 @@ async fn api_key_middleware(
 }
 
 /// Create the API router
-#[allow(dead_code)]
 pub fn create_router(state: AppState) -> Router {
     let state = Arc::new(state);
 

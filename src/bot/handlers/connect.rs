@@ -7,7 +7,6 @@ use std::sync::Arc;
 use teloxide::prelude::*;
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct SessionInfo {
     session_id: String,
     instance_id: String,
@@ -16,7 +15,6 @@ struct SessionInfo {
 }
 
 /// Search for a session by name or ID across managed and discovered instances
-#[allow(dead_code)]
 async fn find_session(name: &str, state: &BotState) -> Result<Option<SessionInfo>> {
     let store = state.orchestrator_store.lock().await;
     let managed_instances = store
@@ -77,7 +75,6 @@ async fn find_session(name: &str, state: &BotState) -> Result<Option<SessionInfo
     Ok(None)
 }
 
-#[allow(dead_code)]
 pub async fn handle_connect(
     bot: Bot,
     msg: Message,

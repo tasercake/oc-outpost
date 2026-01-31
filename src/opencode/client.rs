@@ -35,7 +35,6 @@ struct CreateSessionRequest {
 
 /// Request body for permission reply
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[allow(dead_code)]
 struct PermissionReplyRequest {
     allow: bool,
 }

@@ -9,14 +9,12 @@ use tokio::process::Command;
 /// Released ports can be reused. Orphan processes on ports can be cleaned up
 /// using lsof and kill commands.
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct PortPool {
     start: u16,
     size: u16,
     allocated: Arc<Mutex<HashSet<u16>>>,
 }
 
-#[allow(dead_code)]
 impl PortPool {
     /// Create a new PortPool with the given start port and pool size.
     ///

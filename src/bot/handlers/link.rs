@@ -52,7 +52,6 @@ fn validate_path(path: &str) -> Result<PathBuf> {
     Ok(absolute)
 }
 
-#[allow(dead_code)]
 pub async fn handle_link(bot: Bot, msg: Message, cmd: Command, state: Arc<BotState>) -> Result<()> {
     let topic_id = get_topic_id(&msg)?;
     let chat_id = msg.chat.id;

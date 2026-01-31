@@ -39,7 +39,6 @@ fn parse_callback_data(data: &str) -> Result<(String, String, String)> {
 }
 
 /// Handle permission request from OpenCode
-#[allow(dead_code)]
 pub async fn handle_permission_request(
     bot: Bot,
     chat_id: ChatId,
@@ -63,7 +62,6 @@ pub async fn handle_permission_request(
 }
 
 /// Handle permission callback (Allow/Deny button click)
-#[allow(dead_code)]
 pub async fn handle_permission_callback(
     bot: Bot,
     q: CallbackQuery,

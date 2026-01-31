@@ -29,7 +29,6 @@ const INITIAL_RESTART_DELAY: Duration = Duration::from_secs(1);
 
 /// Status information for the InstanceManager.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct ManagerStatus {
     pub total_instances: usize,
     pub running_instances: usize,
@@ -67,7 +66,6 @@ impl Default for ActivityTracker {
 /// - Auto-restart: Restarts crashed instances with exponential backoff
 /// - Health checks: Periodic health monitoring via background task
 /// - Persistence: Integrates with OrchestratorStore
-#[allow(dead_code)]
 pub struct InstanceManager {
     config: Arc<Config>,
     store: Arc<Mutex<OrchestratorStore>>,
@@ -78,7 +76,6 @@ pub struct InstanceManager {
     shutdown_signal: Arc<Mutex<bool>>,
 }
 
-#[allow(dead_code)]
 impl InstanceManager {
     /// Create a new InstanceManager.
     ///

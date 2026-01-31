@@ -6,7 +6,6 @@ use teloxide::utils::command::BotCommands;
     rename_rule = "lowercase",
     description = "These commands are supported:"
 )]
-#[allow(dead_code)]
 pub enum Command {
     /// Create new project and session
     #[command(description = "create new project and session - Usage: /new <project_name>")]

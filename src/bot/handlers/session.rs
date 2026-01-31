@@ -17,7 +17,6 @@ use std::sync::Arc;
 use teloxide::prelude::*;
 
 /// Extract topic_id from message, ensuring it's not the General topic
-#[allow(dead_code)]
 fn get_topic_id(msg: &Message) -> Result<i32> {
     let thread_id = msg.thread_id.ok_or_else(|| {
         OutpostError::telegram_error("This command must be used in a forum topic")
@@ -34,7 +33,6 @@ fn get_topic_id(msg: &Message) -> Result<i32> {
 }
 
 /// Format timestamp (Unix seconds) to readable format
-#[allow(dead_code)]
 fn format_timestamp(timestamp: i64) -> String {
     // Convert Unix timestamp to a basic date format
     // This is a simple implementation without external dependencies
@@ -89,7 +87,6 @@ fn format_timestamp(timestamp: i64) -> String {
 }
 
 /// Format session information for display
-#[allow(dead_code)]
 fn format_session_info(mapping: &TopicMapping, instance: Option<&InstanceInfo>) -> String {
     let mut output = String::from("Session Info\n\n");
 
@@ -132,7 +129,6 @@ fn format_session_info(mapping: &TopicMapping, instance: Option<&InstanceInfo>) 
 }
 
 /// Handle /session command
-#[allow(dead_code)]
 pub async fn handle_session(
     bot: Bot,
     msg: Message,

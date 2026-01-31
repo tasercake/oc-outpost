@@ -13,7 +13,6 @@ use std::sync::Arc;
 use teloxide::prelude::*;
 
 /// Format uptime from seconds to human-readable format (e.g., "2h 15m")
-#[allow(dead_code)]
 fn format_uptime(seconds: u64) -> String {
     let hours = seconds / 3600;
     let minutes = (seconds % 3600) / 60;
@@ -26,7 +25,6 @@ fn format_uptime(seconds: u64) -> String {
 }
 
 /// Format status output for display
-#[allow(dead_code)]
 fn format_status_output(
     managed_count: usize,
     discovered_count: usize,
@@ -53,7 +51,6 @@ fn format_status_output(
 }
 
 /// Handle /status command
-#[allow(dead_code)]
 pub async fn handle_status(
     bot: Bot,
     msg: Message,

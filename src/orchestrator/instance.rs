@@ -21,7 +21,6 @@ const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 /// Handles process spawning, health checks, and graceful shutdown.
 /// State transitions are tracked and can be queried.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct OpenCodeInstance {
     id: String,
     config: InstanceConfig,
@@ -33,7 +32,6 @@ pub struct OpenCodeInstance {
     http_client: reqwest::Client,
 }
 
-#[allow(dead_code)]
 impl OpenCodeInstance {
     /// Spawn a new OpenCode instance with the given configuration and port.
     ///
