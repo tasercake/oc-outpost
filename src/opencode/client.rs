@@ -1,6 +1,4 @@
-use crate::types::opencode::{
-    CreateMessageRequest, Message, MessageMetadata, MessagePart, SessionInfo,
-};
+use crate::types::opencode::{CreateMessageRequest, Message, MessagePart, SessionInfo};
 use anyhow::{Context, Result};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -13,11 +11,19 @@ pub struct OpenCodeClient {
     base_url: String,
 }
 
+/// Metadata for a message response
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ResponseMetadata {
+    pub id: String,
+    pub role: String,
+    pub model: Option<String>,
+}
+
 /// Response from sending a message
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MessageResponse {
     pub message: Message,
-    pub metadata: MessageMetadata,
+    pub metadata: ResponseMetadata,
 }
 
 /// Request body for creating a session
