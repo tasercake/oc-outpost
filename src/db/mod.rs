@@ -8,6 +8,9 @@ use std::path::Path;
 /// Initialize the orchestrator database with instances table
 #[allow(dead_code)]
 pub async fn init_orchestrator_db(db_path: &Path) -> Result<SqlitePool> {
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let url = format!("sqlite:{}?mode=rwc", db_path.display());
     let pool = SqlitePool::connect(&url).await?;
 
@@ -24,6 +27,9 @@ pub async fn init_orchestrator_db(db_path: &Path) -> Result<SqlitePool> {
 /// Initialize the topics database with topic_mappings table
 #[allow(dead_code)]
 pub async fn init_topics_db(db_path: &Path) -> Result<SqlitePool> {
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let url = format!("sqlite:{}?mode=rwc", db_path.display());
     let pool = SqlitePool::connect(&url).await?;
 
