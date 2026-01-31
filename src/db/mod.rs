@@ -1,5 +1,5 @@
-// Database module for oc-outpost
-// Manages SQLite databases for orchestrator state and topic mappings
+pub mod log_store;
+pub mod tracing_layer;
 
 use anyhow::Result;
 use sqlx::sqlite::SqlitePool;
@@ -23,7 +23,23 @@ pub async fn init_orchestrator_db(db_path: &Path) -> Result<SqlitePool> {
     Ok(pool)
 }
 
-/// Initialize the topics database with topic_mappings table
+pub async fn init_log_db(db_path: &Path) -> Result<SqlitePool> {
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let url = format!("sqlite:{}?mode=rwc", db_path.display());
+    let pool = SqlitePool::connect(&url).await?;
+
+    sqlx::query("PRAGMA journal_mode=WAL;")
+        .execute(&pool)
+        .await?;
+
+    let migration = include_str!("../../migrations/003_create_log_tables.sql");
+    sqlx::raw_sql(migration).execute(&pool).await?;
+
+    Ok(pool)
+}
+
 pub async fn init_topics_db(db_path: &Path) -> Result<SqlitePool> {
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;

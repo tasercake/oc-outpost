@@ -192,6 +192,7 @@ mod tests {
             opencode_startup_timeout: Duration::from_secs(60),
             orchestrator_db_path: temp_dir.path().join("orchestrator.db"),
             topic_db_path: temp_dir.path().join("topics.db"),
+            log_db_path: temp_dir.path().join("logs.db"),
             project_base_path: temp_dir.path().to_path_buf(),
             auto_create_project_dirs: true,
             api_port: 4200,

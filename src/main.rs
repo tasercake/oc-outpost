@@ -16,6 +16,8 @@ use bot::{
 };
 use bot::{BotState, Command};
 use config::Config;
+use db::log_store::LogStore;
+use db::tracing_layer::DatabaseLayer;
 use dptree::case;
 
 use forum::TopicStore;
@@ -30,19 +32,44 @@ use std::time::Instant;
 use teloxide::prelude::*;
 use tokio::signal;
 use tracing::{error, info};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let config = Config::from_env()?;
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("oc_outpost=info")),
-        )
+    let run_id = format!("run_{}", uuid::Uuid::new_v4());
+    let version = env!("CARGO_PKG_VERSION");
+
+    let log_store = LogStore::new(&config.log_db_path).await?;
+
+    let config_summary = serde_json::json!({
+        "max_instances": config.opencode_max_instances,
+        "port_start": config.opencode_port_start,
+        "port_pool_size": config.opencode_port_pool_size,
+        "api_port": config.api_port,
+    });
+    log_store
+        .create_run(&run_id, version, Some(&config_summary.to_string()))
+        .await?;
+
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("oc_outpost=info"));
+
+    let db_layer = DatabaseLayer::new(
+        log_store.clone(),
+        tokio::runtime::Handle::current(),
+        run_id.clone(),
+    );
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(db_layer)
         .init();
 
-    info!("oc-outpost v{}", env!("CARGO_PKG_VERSION"));
+    info!(run_id = %run_id, "oc-outpost v{}", version);
     info!("Starting Telegram bot...");
 
     info!("Initializing databases...");
@@ -269,6 +296,11 @@ async fn main() -> Result<()> {
 
     info!("Stopping API server...");
     api_handle.abort();
+
+    info!("Finishing run log...");
+    if let Err(e) = log_store.finish_run(&run_id).await {
+        error!("Failed to finalize run log: {:?}", e);
+    }
 
     info!("Shutdown complete.");
     Ok(())

@@ -20,9 +20,10 @@ pub struct Config {
     pub opencode_health_check_interval: Duration,
     pub opencode_startup_timeout: Duration,
 
-    // Storage (2 fields)
+    // Storage (3 fields)
     pub orchestrator_db_path: PathBuf,
     pub topic_db_path: PathBuf,
+    pub log_db_path: PathBuf,
 
     // Project (2 fields)
     pub project_base_path: PathBuf,
@@ -113,6 +114,10 @@ impl Config {
             std::env::var("TOPIC_DB_PATH").unwrap_or_else(|_| "./data/topics.db".to_string()),
         );
 
+        let log_db_path = PathBuf::from(
+            std::env::var("LOG_DB_PATH").unwrap_or_else(|_| "./data/logs.db".to_string()),
+        );
+
         let project_base_path = std::env::var("PROJECT_BASE_PATH")
             .map_err(|_| anyhow!("PROJECT_BASE_PATH is required but not set"))?;
         let project_base_path = PathBuf::from(shellexpand::tilde(&project_base_path).into_owned());
@@ -143,6 +148,7 @@ impl Config {
             opencode_startup_timeout,
             orchestrator_db_path,
             topic_db_path,
+            log_db_path,
             project_base_path,
             auto_create_project_dirs,
             api_port,
@@ -155,7 +161,7 @@ impl std::fmt::Display for Config {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Config {{\n  telegram_bot_token: ***MASKED***,\n  telegram_chat_id: {},\n  telegram_allowed_users: {:?},\n  handle_general_topic: {},\n  opencode_path: {:?},\n  opencode_max_instances: {},\n  opencode_idle_timeout: {:?},\n  opencode_port_start: {},\n  opencode_port_pool_size: {},\n  opencode_health_check_interval: {:?},\n  opencode_startup_timeout: {:?},\n  orchestrator_db_path: {:?},\n  topic_db_path: {:?},\n  project_base_path: {:?},\n  auto_create_project_dirs: {},\n  api_port: {},\n  api_key: {},\n}}",
+            "Config {{\n  telegram_bot_token: ***MASKED***,\n  telegram_chat_id: {},\n  telegram_allowed_users: {:?},\n  handle_general_topic: {},\n  opencode_path: {:?},\n  opencode_max_instances: {},\n  opencode_idle_timeout: {:?},\n  opencode_port_start: {},\n  opencode_port_pool_size: {},\n  opencode_health_check_interval: {:?},\n  opencode_startup_timeout: {:?},\n  orchestrator_db_path: {:?},\n  topic_db_path: {:?},\n  log_db_path: {:?},\n  project_base_path: {:?},\n  auto_create_project_dirs: {},\n  api_port: {},\n  api_key: {},\n}}",
             self.telegram_chat_id,
             self.telegram_allowed_users,
             self.handle_general_topic,
@@ -168,6 +174,7 @@ impl std::fmt::Display for Config {
             self.opencode_startup_timeout,
             self.orchestrator_db_path,
             self.topic_db_path,
+            self.log_db_path,
             self.project_base_path,
             self.auto_create_project_dirs,
             self.api_port,
@@ -242,6 +249,7 @@ mod tests {
         std::env::remove_var("OPENCODE_STARTUP_TIMEOUT_MS");
         std::env::remove_var("ORCHESTRATOR_DB_PATH");
         std::env::remove_var("TOPIC_DB_PATH");
+        std::env::remove_var("LOG_DB_PATH");
         std::env::remove_var("AUTO_CREATE_PROJECT_DIRS");
         std::env::remove_var("API_PORT");
         std::env::remove_var("TELEGRAM_ALLOWED_USERS");
@@ -268,6 +276,7 @@ mod tests {
             PathBuf::from("./data/orchestrator.db")
         );
         assert_eq!(config.topic_db_path, PathBuf::from("./data/topics.db"));
+        assert_eq!(config.log_db_path, PathBuf::from("./data/logs.db"));
         assert!(config.auto_create_project_dirs);
         assert_eq!(config.api_port, 4200);
         assert!(config.handle_general_topic);
@@ -432,6 +441,7 @@ mod tests {
         std::env::set_var("OPENCODE_STARTUP_TIMEOUT_MS", "90000");
         std::env::set_var("ORCHESTRATOR_DB_PATH", "./custom/orchestrator.db");
         std::env::set_var("TOPIC_DB_PATH", "./custom/topics.db");
+        std::env::set_var("LOG_DB_PATH", "./custom/logs.db");
         std::env::set_var("PROJECT_BASE_PATH", "~/projects");
         std::env::set_var("AUTO_CREATE_PROJECT_DIRS", "false");
         std::env::set_var("API_PORT", "8080");
@@ -467,6 +477,7 @@ mod tests {
             PathBuf::from("./custom/orchestrator.db")
         );
         assert_eq!(config.topic_db_path, PathBuf::from("./custom/topics.db"));
+        assert_eq!(config.log_db_path, PathBuf::from("./custom/logs.db"));
         assert!(!config.auto_create_project_dirs);
         assert_eq!(config.api_port, 8080);
         assert_eq!(config.api_key, Some("my-secret-key".to_string()));
