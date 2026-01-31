@@ -181,8 +181,10 @@ impl std::fmt::Display for Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
+    #[serial]
     fn test_missing_telegram_bot_token() {
         std::env::remove_var("TELEGRAM_BOT_TOKEN");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
@@ -197,6 +199,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_missing_telegram_chat_id() {
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::remove_var("TELEGRAM_CHAT_ID");
@@ -211,6 +214,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_missing_project_base_path() {
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
@@ -225,6 +229,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_defaults_applied_correctly() {
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
@@ -273,6 +278,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_duration_parsing() {
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
@@ -295,6 +301,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_path_expansion() {
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
@@ -307,6 +314,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_telegram_allowed_users_parsing() {
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
@@ -319,6 +327,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_telegram_allowed_users_empty() {
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
@@ -331,6 +340,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_masked_display() {
         std::env::set_var("TELEGRAM_BOT_TOKEN", "secret-token-12345");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
@@ -346,6 +356,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_invalid_telegram_chat_id() {
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "not-a-number");
@@ -360,6 +371,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_invalid_opencode_max_instances() {
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
@@ -375,6 +387,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_invalid_api_port() {
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
@@ -390,6 +403,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_invalid_boolean_field() {
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
@@ -405,6 +419,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_full_config_load() {
         std::env::set_var("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
