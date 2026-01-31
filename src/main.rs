@@ -12,7 +12,7 @@ mod types;
 use anyhow::Result;
 use bot::{
     handle_clear, handle_connect, handle_disconnect, handle_help, handle_link, handle_new,
-    handle_session, handle_sessions, handle_status, handle_stream,
+    handle_permission_callback, handle_session, handle_sessions, handle_status, handle_stream,
 };
 use bot::{BotState, Command};
 use config::Config;
@@ -58,6 +58,13 @@ async fn main() -> Result<()> {
     let port_pool = PortPool::new(config.opencode_port_start, config.opencode_port_pool_size);
     let instance_manager =
         InstanceManager::new(Arc::new(config.clone()), store_for_manager, port_pool).await?;
+
+    info!("Recovering instances from database...");
+    instance_manager.recover_from_db().await?;
+
+    info!("Starting health check loop...");
+    let _health_check_handle = instance_manager.start_health_check_loop();
+
     let bot_start_time = Instant::now();
 
     let bot_state = Arc::new(BotState::new(
@@ -222,10 +229,22 @@ async fn main() -> Result<()> {
                     respond(())
                 }
             }
+        }))
+        .branch(Update::filter_callback_query().endpoint({
+            let state = Arc::clone(&bot_state);
+            move |bot: Bot, q: CallbackQuery| {
+                let state = Arc::clone(&state);
+                async move {
+                    if let Err(e) = handle_permission_callback(bot, q, state).await {
+                        error!("Error handling callback: {:?}", e);
+                    }
+                    respond(())
+                }
+            }
         }));
 
     let mut dispatcher = Dispatcher::builder(bot.clone(), handler)
-        .dependencies(dptree::deps![bot_state])
+        .dependencies(dptree::deps![bot_state.clone()])
         .enable_ctrlc_handler()
         .build();
 
@@ -238,6 +257,11 @@ async fn main() -> Result<()> {
         _ = signal::ctrl_c() => {
             info!("Received Ctrl+C, shutting down gracefully...");
         }
+    }
+
+    info!("Stopping all OpenCode instances...");
+    if let Err(e) = bot_state.instance_manager.stop_all().await {
+        error!("Error stopping instances: {:?}", e);
     }
 
     info!("Stopping active streams...");
