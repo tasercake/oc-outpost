@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Write;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::log_store::LogStore;
@@ -17,6 +18,7 @@ pub struct DatabaseLayer {
     store: LogStore,
     handle: Handle,
     run_id: String,
+    sequence: AtomicI64,
 }
 
 impl DatabaseLayer {
@@ -25,6 +27,7 @@ impl DatabaseLayer {
             store,
             handle,
             run_id,
+            sequence: AtomicI64::new(0),
         }
     }
 }
@@ -40,6 +43,8 @@ where
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as i64;
+
+        let seq = self.sequence.fetch_add(1, Ordering::SeqCst);
 
         let level = metadata.level().as_str();
         let target = metadata.target();
@@ -64,6 +69,7 @@ where
                 .insert_log(
                     &run_id,
                     timestamp,
+                    seq,
                     &level,
                     &target,
                     &message,

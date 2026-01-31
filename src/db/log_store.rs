@@ -62,17 +62,19 @@ impl LogStore {
         &self,
         run_id: &str,
         timestamp: i64,
+        sequence: i64,
         level: &str,
         target: &str,
         message: &str,
         fields: Option<&str>,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO run_logs (run_id, timestamp, level, target, message, fields)
-             VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO run_logs (run_id, timestamp, sequence, level, target, message, fields)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(run_id)
         .bind(timestamp)
+        .bind(sequence)
         .bind(level)
         .bind(target)
         .bind(message)
@@ -144,6 +146,7 @@ mod tests {
             .insert_log(
                 "run_abc",
                 1000,
+                0,
                 "INFO",
                 "oc_outpost::bot",
                 "Bot started",
@@ -156,6 +159,7 @@ mod tests {
             .insert_log(
                 "run_abc",
                 2000,
+                1,
                 "ERROR",
                 "oc_outpost::orchestrator",
                 "Instance crashed",

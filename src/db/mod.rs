@@ -37,6 +37,13 @@ pub async fn init_log_db(db_path: &Path) -> Result<SqlitePool> {
     let migration = include_str!("../../migrations/003_create_log_tables.sql");
     sqlx::raw_sql(migration).execute(&pool).await?;
 
+    // Add sequence column for log ordering (idempotent for existing DBs).
+    // tokio::spawn in DatabaseLayer causes insertion order to differ from
+    // emission order; this monotonic counter preserves the true order.
+    let _ = sqlx::query("ALTER TABLE run_logs ADD COLUMN sequence INTEGER DEFAULT 0")
+        .execute(&pool)
+        .await;
+
     Ok(pool)
 }
 

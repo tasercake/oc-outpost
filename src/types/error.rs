@@ -75,6 +75,22 @@ pub enum OutpostError {
 }
 
 impl OutpostError {
+    /// Returns true if this error was caused by user input/action rather than a
+    /// system failure. Used to downgrade error logging from ERROR to WARN in
+    /// top-level command dispatch, since user-triggered errors (wrong command
+    /// context, invalid input, etc.) are expected operational noise.
+    pub fn is_user_error(&self) -> bool {
+        matches!(
+            self,
+            Self::TelegramError { .. }
+                | Self::ConfigError { .. }
+                | Self::TopicMappingNotFound { .. }
+                | Self::TopicMappingAlreadyExists { .. }
+                | Self::SessionNotFound { .. }
+                | Self::MaxInstancesReached { .. }
+        )
+    }
+
     #[allow(dead_code)]
     // Used by future: instance lookup error handling
     pub fn instance_not_found(id: impl Into<String>) -> Self {
@@ -323,6 +339,22 @@ mod tests {
     fn test_telegram_error() {
         let err = OutpostError::telegram_error("Bot token invalid");
         assert_eq!(err.to_string(), "Telegram API error: Bot token invalid");
+    }
+
+    #[test]
+    fn test_is_user_error_classification() {
+        assert!(OutpostError::telegram_error("test").is_user_error());
+        assert!(OutpostError::config_error("test").is_user_error());
+        assert!(OutpostError::topic_mapping_not_found(1).is_user_error());
+        assert!(OutpostError::topic_mapping_already_exists(1).is_user_error());
+        assert!(OutpostError::session_not_found("test").is_user_error());
+        assert!(OutpostError::max_instances_reached(10).is_user_error());
+
+        assert!(!OutpostError::database_error("test").is_user_error());
+        assert!(!OutpostError::io_error("test").is_user_error());
+        assert!(!OutpostError::opencode_api_error("test").is_user_error());
+        assert!(!OutpostError::instance_not_found("test").is_user_error());
+        assert!(!OutpostError::port_allocation_error(3000, 3100).is_user_error());
     }
 
     #[test]

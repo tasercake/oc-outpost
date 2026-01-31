@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS run_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id TEXT NOT NULL REFERENCES bot_runs(run_id),
     timestamp INTEGER NOT NULL,
+    sequence INTEGER NOT NULL DEFAULT 0,
     level TEXT NOT NULL,
     target TEXT NOT NULL,
     message TEXT NOT NULL,

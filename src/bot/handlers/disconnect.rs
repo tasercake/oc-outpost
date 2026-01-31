@@ -57,7 +57,14 @@ pub async fn handle_disconnect(
             if instance_info.instance_type == InstanceType::Managed {
                 debug!(instance_id = %instance_id, "Stopping managed instance");
                 if let Err(e) = state.instance_manager.stop_instance(instance_id).await {
-                    warn!("Failed to stop instance {}: {:?}", instance_id, e);
+                    warn!(
+                        instance_id = %instance_id,
+                        db_state = ?instance_info.state,
+                        instance_type = ?instance_info.instance_type,
+                        error = %e,
+                        "Failed to stop instance — instance exists in DB but not in runtime memory \
+                         (likely already stopped or not recovered after restart)"
+                    );
                 }
             }
         }

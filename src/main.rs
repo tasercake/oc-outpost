@@ -31,9 +31,41 @@ use std::sync::Arc;
 use std::time::Instant;
 use teloxide::prelude::*;
 use tokio::signal;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use types::error::OutpostError;
+
+fn log_command_error(
+    command: &str,
+    e: &OutpostError,
+    chat_id: i64,
+    topic_id: Option<i32>,
+    sender_id: Option<u64>,
+    sender_username: Option<&str>,
+) {
+    if e.is_user_error() {
+        warn!(
+            command = command,
+            chat_id = chat_id,
+            topic_id = ?topic_id,
+            sender_id = ?sender_id,
+            sender_username = ?sender_username,
+            error = %e,
+            "User error handling command"
+        );
+    } else {
+        error!(
+            command = command,
+            chat_id = chat_id,
+            topic_id = ?topic_id,
+            sender_id = ?sender_id,
+            sender_username = ?sender_username,
+            error = %e,
+            "Error handling command"
+        );
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -147,8 +179,20 @@ async fn main() -> Result<()> {
                     move |bot: Bot, msg: Message, cmd: Command| {
                         let state = Arc::clone(&state);
                         async move {
+                            let chat_id = msg.chat.id.0;
+                            let topic_id = msg.thread_id.map(|t| t.0 .0);
+                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
+                            let sender_username =
+                                msg.from.as_ref().and_then(|u| u.username.clone());
                             if let Err(e) = handle_new(bot, msg, cmd, state).await {
-                                error!("Error handling /new: {:?}", e);
+                                log_command_error(
+                                    "/new",
+                                    &e,
+                                    chat_id,
+                                    topic_id,
+                                    sender_id,
+                                    sender_username.as_deref(),
+                                );
                             }
                             respond(())
                         }
@@ -159,8 +203,20 @@ async fn main() -> Result<()> {
                     move |bot: Bot, msg: Message, cmd: Command| {
                         let state = Arc::clone(&state);
                         async move {
+                            let chat_id = msg.chat.id.0;
+                            let topic_id = msg.thread_id.map(|t| t.0 .0);
+                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
+                            let sender_username =
+                                msg.from.as_ref().and_then(|u| u.username.clone());
                             if let Err(e) = handle_sessions(bot, msg, cmd, state).await {
-                                error!("Error handling /sessions: {:?}", e);
+                                log_command_error(
+                                    "/sessions",
+                                    &e,
+                                    chat_id,
+                                    topic_id,
+                                    sender_id,
+                                    sender_username.as_deref(),
+                                );
                             }
                             respond(())
                         }
@@ -171,8 +227,20 @@ async fn main() -> Result<()> {
                     move |bot: Bot, msg: Message, cmd: Command| {
                         let state = Arc::clone(&state);
                         async move {
+                            let chat_id = msg.chat.id.0;
+                            let topic_id = msg.thread_id.map(|t| t.0 .0);
+                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
+                            let sender_username =
+                                msg.from.as_ref().and_then(|u| u.username.clone());
                             if let Err(e) = handle_connect(bot, msg, cmd, state).await {
-                                error!("Error handling /connect: {:?}", e);
+                                log_command_error(
+                                    "/connect",
+                                    &e,
+                                    chat_id,
+                                    topic_id,
+                                    sender_id,
+                                    sender_username.as_deref(),
+                                );
                             }
                             respond(())
                         }
@@ -183,8 +251,20 @@ async fn main() -> Result<()> {
                     move |bot: Bot, msg: Message, cmd: Command| {
                         let state = Arc::clone(&state);
                         async move {
+                            let chat_id = msg.chat.id.0;
+                            let topic_id = msg.thread_id.map(|t| t.0 .0);
+                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
+                            let sender_username =
+                                msg.from.as_ref().and_then(|u| u.username.clone());
                             if let Err(e) = handle_disconnect(bot, msg, cmd, state).await {
-                                error!("Error handling /disconnect: {:?}", e);
+                                log_command_error(
+                                    "/disconnect",
+                                    &e,
+                                    chat_id,
+                                    topic_id,
+                                    sender_id,
+                                    sender_username.as_deref(),
+                                );
                             }
                             respond(())
                         }
@@ -195,8 +275,20 @@ async fn main() -> Result<()> {
                     move |bot: Bot, msg: Message, cmd: Command| {
                         let state = Arc::clone(&state);
                         async move {
+                            let chat_id = msg.chat.id.0;
+                            let topic_id = msg.thread_id.map(|t| t.0 .0);
+                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
+                            let sender_username =
+                                msg.from.as_ref().and_then(|u| u.username.clone());
                             if let Err(e) = handle_link(bot, msg, cmd, state).await {
-                                error!("Error handling /link: {:?}", e);
+                                log_command_error(
+                                    "/link",
+                                    &e,
+                                    chat_id,
+                                    topic_id,
+                                    sender_id,
+                                    sender_username.as_deref(),
+                                );
                             }
                             respond(())
                         }
@@ -207,8 +299,20 @@ async fn main() -> Result<()> {
                     move |bot: Bot, msg: Message, cmd: Command| {
                         let state = Arc::clone(&state);
                         async move {
+                            let chat_id = msg.chat.id.0;
+                            let topic_id = msg.thread_id.map(|t| t.0 .0);
+                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
+                            let sender_username =
+                                msg.from.as_ref().and_then(|u| u.username.clone());
                             if let Err(e) = handle_stream(bot, msg, cmd, state).await {
-                                error!("Error handling /stream: {:?}", e);
+                                log_command_error(
+                                    "/stream",
+                                    &e,
+                                    chat_id,
+                                    topic_id,
+                                    sender_id,
+                                    sender_username.as_deref(),
+                                );
                             }
                             respond(())
                         }
@@ -219,8 +323,20 @@ async fn main() -> Result<()> {
                     move |bot: Bot, msg: Message, cmd: Command| {
                         let state = Arc::clone(&state);
                         async move {
+                            let chat_id = msg.chat.id.0;
+                            let topic_id = msg.thread_id.map(|t| t.0 .0);
+                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
+                            let sender_username =
+                                msg.from.as_ref().and_then(|u| u.username.clone());
                             if let Err(e) = handle_session(bot, msg, cmd, state).await {
-                                error!("Error handling /session: {:?}", e);
+                                log_command_error(
+                                    "/session",
+                                    &e,
+                                    chat_id,
+                                    topic_id,
+                                    sender_id,
+                                    sender_username.as_deref(),
+                                );
                             }
                             respond(())
                         }
@@ -231,8 +347,20 @@ async fn main() -> Result<()> {
                     move |bot: Bot, msg: Message, cmd: Command| {
                         let state = Arc::clone(&state);
                         async move {
+                            let chat_id = msg.chat.id.0;
+                            let topic_id = msg.thread_id.map(|t| t.0 .0);
+                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
+                            let sender_username =
+                                msg.from.as_ref().and_then(|u| u.username.clone());
                             if let Err(e) = handle_status(bot, msg, cmd, state).await {
-                                error!("Error handling /status: {:?}", e);
+                                log_command_error(
+                                    "/status",
+                                    &e,
+                                    chat_id,
+                                    topic_id,
+                                    sender_id,
+                                    sender_username.as_deref(),
+                                );
                             }
                             respond(())
                         }
@@ -243,8 +371,20 @@ async fn main() -> Result<()> {
                     move |bot: Bot, msg: Message, cmd: Command| {
                         let state = Arc::clone(&state);
                         async move {
+                            let chat_id = msg.chat.id.0;
+                            let topic_id = msg.thread_id.map(|t| t.0 .0);
+                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
+                            let sender_username =
+                                msg.from.as_ref().and_then(|u| u.username.clone());
                             if let Err(e) = handle_clear(bot, msg, cmd, state).await {
-                                error!("Error handling /clear: {:?}", e);
+                                log_command_error(
+                                    "/clear",
+                                    &e,
+                                    chat_id,
+                                    topic_id,
+                                    sender_id,
+                                    sender_username.as_deref(),
+                                );
                             }
                             respond(())
                         }
@@ -255,8 +395,20 @@ async fn main() -> Result<()> {
                     move |bot: Bot, msg: Message, cmd: Command| {
                         let state = Arc::clone(&state);
                         async move {
+                            let chat_id = msg.chat.id.0;
+                            let topic_id = msg.thread_id.map(|t| t.0 .0);
+                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
+                            let sender_username =
+                                msg.from.as_ref().and_then(|u| u.username.clone());
                             if let Err(e) = handle_help(bot, msg, cmd, state).await {
-                                error!("Error handling /help: {:?}", e);
+                                log_command_error(
+                                    "/help",
+                                    &e,
+                                    chat_id,
+                                    topic_id,
+                                    sender_id,
+                                    sender_username.as_deref(),
+                                );
                             }
                             respond(())
                         }
@@ -274,14 +426,25 @@ async fn main() -> Result<()> {
                     let sender_username = msg.from.as_ref().and_then(|u| u.username.clone());
 
                     if let Err(e) = integration.handle_message(bot, msg).await {
-                        error!(
-                            chat_id = chat_id,
-                            topic_id = ?topic_id,
-                            sender_id = ?sender_id,
-                            sender_username = ?sender_username,
-                            error = ?e,
-                            "Error handling message"
-                        );
+                        if e.is_user_error() {
+                            warn!(
+                                chat_id = chat_id,
+                                topic_id = ?topic_id,
+                                sender_id = ?sender_id,
+                                sender_username = ?sender_username,
+                                error = %e,
+                                "User error handling message"
+                            );
+                        } else {
+                            error!(
+                                chat_id = chat_id,
+                                topic_id = ?topic_id,
+                                sender_id = ?sender_id,
+                                sender_username = ?sender_username,
+                                error = %e,
+                                "Error handling message"
+                            );
+                        }
                     }
                     respond(())
                 }
@@ -292,8 +455,15 @@ async fn main() -> Result<()> {
             move |bot: Bot, q: CallbackQuery| {
                 let state = Arc::clone(&state);
                 async move {
+                    let sender_id = q.from.id.0;
+                    let sender_username = q.from.username.clone();
                     if let Err(e) = handle_permission_callback(bot, q, state).await {
-                        error!("Error handling callback: {:?}", e);
+                        error!(
+                            sender_id = sender_id,
+                            sender_username = ?sender_username,
+                            error = %e,
+                            "Error handling callback"
+                        );
                     }
                     respond(())
                 }
