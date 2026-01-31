@@ -366,19 +366,187 @@ impl InstanceManager {
                                     tracker.last_attempt = Some(Instant::now());
                                     drop(trackers);
 
+                                    tracing::info!(
+                                        "Waiting {:?} before restart attempt for {}",
+                                        delay,
+                                        id
+                                    );
                                     tokio::time::sleep(delay).await;
 
-                                    // Try to restart (simplified - would need more context)
-                                    let store = store.lock().await;
-                                    let _ = store.update_state(&id, InstanceState::Error).await;
+                                    let project_path = {
+                                        let store_guard = store.lock().await;
+                                        match store_guard.get_instance(&id).await {
+                                            Ok(Some(info)) => info.project_path.clone(),
+                                            _ => {
+                                                tracing::error!(
+                                                    "Failed to get instance info for restart of {}",
+                                                    id
+                                                );
+                                                let _ = store_guard
+                                                    .update_state(&id, InstanceState::Error)
+                                                    .await;
+                                                continue;
+                                            }
+                                        }
+                                    };
+
+                                    let old_port = {
+                                        let inst = instance.lock().await;
+                                        inst.port()
+                                    };
+
+                                    {
+                                        let mut instances_lock = instances.lock().await;
+                                        instances_lock.remove(&id);
+                                    }
+
+                                    port_pool.release(old_port).await;
+                                    let new_port = match port_pool.allocate().await {
+                                        Ok(p) => p,
+                                        Err(e) => {
+                                            tracing::error!(
+                                                "No ports available for restart of {}: {}",
+                                                id,
+                                                e
+                                            );
+                                            let store_guard = store.lock().await;
+                                            let _ = store_guard
+                                                .update_state(&id, InstanceState::Error)
+                                                .await;
+                                            continue;
+                                        }
+                                    };
+
+                                    let new_id = format!(
+                                        "inst_{}",
+                                        uuid::Uuid::new_v4().to_string().split('-').next().unwrap()
+                                    );
+                                    let instance_config = InstanceConfig {
+                                        id: new_id.clone(),
+                                        instance_type: InstanceType::Managed,
+                                        project_path: project_path.clone(),
+                                        port: new_port,
+                                        auto_start: true,
+                                    };
+
+                                    match OpenCodeInstance::spawn(instance_config, new_port).await {
+                                        Ok(new_instance) => {
+                                            let new_instance = Arc::new(Mutex::new(new_instance));
+
+                                            let ready = {
+                                                let inst = new_instance.lock().await;
+                                                inst.wait_for_ready(
+                                                    config.opencode_startup_timeout,
+                                                    Duration::from_millis(500),
+                                                )
+                                                .await
+                                            };
+
+                                            match ready {
+                                                Ok(true) => {
+                                                    let info = InstanceInfo {
+                                                        id: new_id.clone(),
+                                                        state: InstanceState::Running,
+                                                        instance_type: InstanceType::Managed,
+                                                        project_path: project_path.clone(),
+                                                        port: new_port,
+                                                        pid: None,
+                                                        started_at: Some(
+                                                            std::time::SystemTime::now()
+                                                                .duration_since(
+                                                                    std::time::UNIX_EPOCH,
+                                                                )
+                                                                .unwrap()
+                                                                .as_secs()
+                                                                as i64,
+                                                        ),
+                                                        stopped_at: None,
+                                                    };
+
+                                                    {
+                                                        let store_guard = store.lock().await;
+                                                        if let Err(e) = store_guard
+                                                            .save_instance(&info, None)
+                                                            .await
+                                                        {
+                                                            tracing::error!(
+                                                                "Failed to save restarted instance: {:?}",
+                                                                e
+                                                            );
+                                                            port_pool.release(new_port).await;
+                                                            continue;
+                                                        }
+                                                        let _ = store_guard
+                                                            .update_state(&id, InstanceState::Error)
+                                                            .await;
+                                                    }
+
+                                                    instances
+                                                        .lock()
+                                                        .await
+                                                        .insert(new_id.clone(), new_instance);
+
+                                                    // Carry over attempt count so MAX_RESTART_ATTEMPTS spans the full lineage
+                                                    {
+                                                        let mut trk = restart_trackers.lock().await;
+                                                        if let Some(old_tracker) = trk.remove(&id) {
+                                                            trk.insert(new_id.clone(), old_tracker);
+                                                        }
+                                                    }
+
+                                                    {
+                                                        let mut at = activity_trackers.lock().await;
+                                                        at.remove(&id);
+                                                        at.insert(
+                                                            new_id.clone(),
+                                                            ActivityTracker::default(),
+                                                        );
+                                                    }
+
+                                                    tracing::info!(
+                                                        "Successfully restarted instance {} as {}",
+                                                        id,
+                                                        new_id
+                                                    );
+                                                }
+                                                _ => {
+                                                    tracing::error!(
+                                                        "Restarted instance {} failed readiness check",
+                                                        id
+                                                    );
+                                                    let inst = new_instance.lock().await;
+                                                    let _ = inst.stop().await;
+                                                    drop(inst);
+                                                    port_pool.release(new_port).await;
+                                                    let store_guard = store.lock().await;
+                                                    let _ = store_guard
+                                                        .update_state(&id, InstanceState::Error)
+                                                        .await;
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::error!(
+                                                "Failed to spawn restart for {}: {:?}",
+                                                id,
+                                                e
+                                            );
+                                            port_pool.release(new_port).await;
+                                            let store_guard = store.lock().await;
+                                            let _ = store_guard
+                                                .update_state(&id, InstanceState::Error)
+                                                .await;
+                                        }
+                                    }
                                 } else {
                                     drop(trackers);
                                     tracing::error!(
                                         "Instance {} exceeded max restart attempts, marking as error",
                                         id
                                     );
-                                    let store = store.lock().await;
-                                    let _ = store.update_state(&id, InstanceState::Error).await;
+                                    let store_guard = store.lock().await;
+                                    let _ =
+                                        store_guard.update_state(&id, InstanceState::Error).await;
                                 }
                             }
                             Ok(false) => {
