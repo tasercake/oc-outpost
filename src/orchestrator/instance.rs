@@ -59,8 +59,9 @@ impl OpenCodeInstance {
         cmd.arg("serve")
             .arg("--port")
             .arg(port.to_string())
-            .arg("--project")
-            .arg(&config.project_path)
+            .current_dir(&config.project_path)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
 
         let child = cmd.spawn().map_err(|e| {
