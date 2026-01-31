@@ -66,7 +66,7 @@ impl Integration {
     /// Handle incoming Telegram message and route to OpenCode
     ///
     /// Flow:
-    /// 1. Extract message text
+    /// 1. Extract message text (skip non-text messages gracefully)
     /// 2. Get topic mapping
     /// 3. If no mapping, ignore (only handle mapped topics)
     /// 4. Create OpenCode client for instance
@@ -74,10 +74,20 @@ impl Integration {
     /// 6. Send to OpenCode async
     /// 7. If streaming enabled, subscribe to SSE
     pub async fn handle_message(&self, bot: Bot, msg: Message) -> Result<()> {
-        // 1. Extract text from message
-        let text = msg
-            .text()
-            .ok_or_else(|| OutpostError::telegram_error("Message has no text content"))?;
+        // 1. Extract text from message — skip non-text messages gracefully
+        let text = match msg.text() {
+            Some(t) => t,
+            None => {
+                debug!(
+                    chat_id = msg.chat.id.0,
+                    topic_id = ?msg.thread_id.map(|t| t.0 .0),
+                    sender_id = ?msg.from.as_ref().map(|u| u.id.0),
+                    message_kind = describe_message_kind(&msg),
+                    "Ignoring non-text message"
+                );
+                return Ok(());
+            }
+        };
 
         // 2. Get topic ID (thread_id in Telegram)
         let thread_id = msg.thread_id.ok_or_else(|| {
@@ -103,9 +113,23 @@ impl Integration {
         };
 
         // 4. Ensure we have session_id
-        let session_id = mapping.session_id.as_ref().ok_or_else(|| {
-            OutpostError::session_not_found(format!("No session for topic {}", topic_id))
-        })?;
+        let session_id = match mapping.session_id.as_ref() {
+            Some(id) => id,
+            None => {
+                warn!(
+                    topic_id = topic_id,
+                    project_path = %mapping.project_path,
+                    instance_id = ?mapping.instance_id,
+                    sender_id = ?msg.from.as_ref().map(|u| u.id.0),
+                    sender_username = ?msg.from.as_ref().and_then(|u| u.username.as_deref()),
+                    "Message sent to topic with no session — topic has mapping but session_id is None"
+                );
+                return Err(OutpostError::session_not_found(format!(
+                    "No session for topic {} (project: {})",
+                    topic_id, mapping.project_path
+                )));
+            }
+        };
 
         // 5. Get OpenCode client for instance
         let port = self.get_instance_port(&mapping).await?;
@@ -475,6 +499,48 @@ impl Integration {
     // Used by future: stream monitoring feature
     pub async fn active_stream_count(&self) -> usize {
         self.active_streams.lock().await.len()
+    }
+}
+
+fn describe_message_kind(msg: &Message) -> &'static str {
+    if msg.text().is_some() {
+        "text"
+    } else if msg.photo().is_some() {
+        "photo"
+    } else if msg.sticker().is_some() {
+        "sticker"
+    } else if msg.video().is_some() {
+        "video"
+    } else if msg.voice().is_some() {
+        "voice"
+    } else if msg.document().is_some() {
+        "document"
+    } else if msg.audio().is_some() {
+        "audio"
+    } else if msg.animation().is_some() {
+        "animation"
+    } else if msg.video_note().is_some() {
+        "video_note"
+    } else if msg.contact().is_some() {
+        "contact"
+    } else if msg.location().is_some() {
+        "location"
+    } else if msg.poll().is_some() {
+        "poll"
+    } else if msg.forum_topic_created().is_some() {
+        "forum_topic_created"
+    } else if msg.forum_topic_edited().is_some() {
+        "forum_topic_edited"
+    } else if msg.forum_topic_closed().is_some() {
+        "forum_topic_closed"
+    } else if msg.forum_topic_reopened().is_some() {
+        "forum_topic_reopened"
+    } else if msg.new_chat_members().is_some() {
+        "new_chat_members"
+    } else if msg.left_chat_member().is_some() {
+        "left_chat_member"
+    } else {
+        "other"
     }
 }
 

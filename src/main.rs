@@ -250,8 +250,20 @@ async fn main() -> Result<()> {
             move |bot: Bot, msg: Message| {
                 let integration = Arc::clone(&integration);
                 async move {
+                    let chat_id = msg.chat.id.0;
+                    let topic_id = msg.thread_id.map(|t| t.0 .0);
+                    let sender_id = msg.from.as_ref().map(|u| u.id.0);
+                    let sender_username = msg.from.as_ref().and_then(|u| u.username.clone());
+
                     if let Err(e) = integration.handle_message(bot, msg).await {
-                        error!("Error handling message: {:?}", e);
+                        error!(
+                            chat_id = chat_id,
+                            topic_id = ?topic_id,
+                            sender_id = ?sender_id,
+                            sender_username = ?sender_username,
+                            error = ?e,
+                            "Error handling message"
+                        );
                     }
                     respond(())
                 }
