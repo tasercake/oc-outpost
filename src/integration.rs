@@ -89,11 +89,21 @@ impl Integration {
             }
         };
 
+        debug!(
+            topic_id = ?msg.thread_id.map(|t| t.0 .0),
+            sender_id = ?msg.from.as_ref().map(|u| u.id.0),
+            text_len = text.len(),
+            text_preview = %text.chars().take(100).collect::<String>(),
+            "Received text message in topic"
+        );
+
         // 2. Get topic ID (thread_id in Telegram)
         let thread_id = msg.thread_id.ok_or_else(|| {
             OutpostError::telegram_error("Message is not in a forum topic (no thread_id)")
         })?;
         let topic_id = thread_id.0 .0; // Extract i32 from ThreadId(MessageId(i32))
+
+        debug!(topic_id = topic_id, "Extracted topic ID");
 
         // 3. Get topic mapping
         let mapping = {
@@ -104,6 +114,12 @@ impl Integration {
                 .map_err(|e| OutpostError::database_error(e.to_string()))?
         };
 
+        debug!(
+            topic_id = topic_id,
+            mapping_found = mapping.is_some(),
+            "Topic mapping lookup result"
+        );
+
         let mapping = match mapping {
             Some(m) => m,
             None => {
@@ -113,6 +129,15 @@ impl Integration {
         };
 
         // 4. Ensure we have session_id
+        debug!(
+            topic_id = topic_id,
+            session_id = ?mapping.session_id,
+            instance_id = ?mapping.instance_id,
+            streaming = mapping.streaming_enabled,
+            project_path = %mapping.project_path,
+            "Topic mapping details"
+        );
+
         let session_id = match mapping.session_id.as_ref() {
             Some(id) => id,
             None => {
@@ -133,16 +158,27 @@ impl Integration {
 
         // 5. Get OpenCode client for instance
         let port = self.get_instance_port(&mapping).await?;
+        debug!(topic_id = topic_id, port = port, "Resolved instance port");
         let client = OpenCodeClient::new(&format!("http://localhost:{}", port));
 
         // 6. Mark as from Telegram (for deduplication)
         self.stream_handler.mark_from_telegram(session_id, text);
+        debug!(
+            session_id = session_id,
+            "Marked message as from Telegram for dedup"
+        );
 
         // 7. Send message to OpenCode async
         client
             .send_message_async(session_id, text)
             .await
             .map_err(|e| OutpostError::opencode_api_error(e.to_string()))?;
+
+        debug!(
+            session_id = session_id,
+            topic_id = topic_id,
+            "Message sent to OpenCode async"
+        );
 
         info!(
             "Routed message to OpenCode: topic={}, session={}",
@@ -155,20 +191,37 @@ impl Integration {
                 .await?;
         }
 
+        debug!(
+            topic_id = topic_id,
+            streaming_enabled = mapping.streaming_enabled,
+            "Streaming subscription check complete"
+        );
+
         Ok(())
     }
 
     /// Get the port for an instance from the mapping
     async fn get_instance_port(&self, mapping: &TopicMapping) -> Result<u16> {
+        debug!(instance_id = ?mapping.instance_id, "Looking up instance port");
+
         // For external instances, we need to look up the port from the orchestrator store
         if let Some(instance_id) = &mapping.instance_id {
             let store = self.state.orchestrator_store.lock().await;
             if let Ok(Some(info)) = store.get_instance(instance_id).await {
+                debug!(
+                    instance_id = ?mapping.instance_id,
+                    port = info.port,
+                    "Found port in orchestrator store"
+                );
                 return Ok(info.port);
             }
         }
 
         // Fall back to config's default port (for managed instances)
+        debug!(
+            default_port = self.state.config.opencode_port_start,
+            "Using default port (instance not in store)"
+        );
         Ok(self.state.config.opencode_port_start)
     }
 
@@ -184,6 +237,10 @@ impl Integration {
         {
             let streams = self.active_streams.lock().await;
             if streams.contains_key(&topic_id) {
+                debug!(
+                    topic_id = topic_id,
+                    "Stream already active, skipping subscription"
+                );
                 return Ok(());
             }
         }
@@ -194,6 +251,12 @@ impl Integration {
             .ok_or_else(|| OutpostError::session_not_found("No session for topic"))?;
 
         // Subscribe to SSE
+        debug!(
+            topic_id = topic_id,
+            session_id = %session_id,
+            "Subscribing to SSE stream"
+        );
+
         let rx = self
             .stream_handler
             .subscribe(&session_id)
@@ -208,6 +271,8 @@ impl Integration {
             let mut streams = self.active_streams.lock().await;
             streams.insert(topic_id, handle);
         }
+
+        debug!(topic_id = topic_id, "Stream subscription registered");
 
         Ok(())
     }
@@ -228,6 +293,13 @@ impl Integration {
         tokio::spawn(async move {
             let mut first_response = !mapping.topic_name_updated;
             let session_id = mapping.session_id.clone().unwrap_or_default();
+
+            debug!(
+                topic_id = topic_id,
+                session_id = %session_id,
+                first_response = first_response,
+                "Stream forwarder task started"
+            );
 
             while let Some(event) = rx.recv().await {
                 if let Err(e) = Self::handle_stream_event(
@@ -296,12 +368,21 @@ impl Integration {
                         || state.pending_text.len() >= TELEGRAM_MAX_MESSAGE_LENGTH / 2
                 };
 
+                debug!(
+                    topic_id = topic_id,
+                    chunk_len = text.len(),
+                    should_send = should_send,
+                    "Text chunk received"
+                );
+
                 if should_send {
                     Self::flush_pending_text(bot, chat_id, topic_id, rate_limiters).await;
                 }
             }
 
             StreamEvent::ToolInvocation { name, args } => {
+                debug!(topic_id = topic_id, tool_name = %name, "Tool invocation event");
+
                 // Flush any pending text first
                 Self::flush_pending_text(bot, chat_id, topic_id, rate_limiters).await;
 
@@ -314,6 +395,12 @@ impl Integration {
             }
 
             StreamEvent::ToolResult { result } => {
+                debug!(
+                    topic_id = topic_id,
+                    result_len = result.len(),
+                    "Tool result event"
+                );
+
                 let truncated = if result.len() > 500 {
                     format!("{}...", &result[..500])
                 } else {
@@ -345,6 +432,13 @@ impl Integration {
                 permission_type,
                 details,
             } => {
+                debug!(
+                    topic_id = topic_id,
+                    permission_id = %id,
+                    permission_type = %permission_type,
+                    "Permission request event"
+                );
+
                 use crate::bot::handle_permission_request;
                 let description = format!(
                     "{}: {}",
@@ -403,6 +497,12 @@ impl Integration {
             }
         };
 
+        debug!(
+            topic_id = topic_id,
+            text_len = text_to_send.len(),
+            "Flushing batched text to Telegram"
+        );
+
         // Convert markdown and send
         let html = markdown_to_telegram_html(&text_to_send);
         if let Err(e) = Self::send_telegram_message(bot, chat_id, topic_id, &html).await {
@@ -419,6 +519,13 @@ impl Integration {
     ) -> Result<()> {
         // Split long messages
         let parts = crate::telegram::markdown::split_message(text, TELEGRAM_MAX_MESSAGE_LENGTH);
+
+        debug!(
+            topic_id = topic_id,
+            parts_count = parts.len(),
+            total_len = text.len(),
+            "Sending message parts to Telegram"
+        );
 
         for part in parts {
             bot.send_message(chat_id, &part)
@@ -439,6 +546,12 @@ impl Integration {
         mapping: &TopicMapping,
         state: &Arc<BotState>,
     ) -> Result<()> {
+        debug!(
+            topic_id = topic_id,
+            project_path = %mapping.project_path,
+            "Attempting topic name update"
+        );
+
         // Extract project name from path
         let project_name = Path::new(&mapping.project_path)
             .file_name()
@@ -483,10 +596,14 @@ impl Integration {
 
     /// Stop all active streams
     pub async fn stop_all_streams(&self) {
+        debug!("Stopping all active streams");
+
         let handles: Vec<_> = {
             let mut streams = self.active_streams.lock().await;
             streams.drain().collect()
         };
+
+        debug!(count = handles.len(), "Stopping active stream handles");
 
         for (topic_id, handle) in handles {
             handle.abort();

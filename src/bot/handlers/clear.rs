@@ -4,6 +4,7 @@ use crate::types::instance::InstanceType;
 use std::sync::Arc;
 use std::time::Duration;
 use teloxide::prelude::*;
+use tracing::debug;
 
 pub async fn handle_clear(
     bot: Bot,
@@ -11,6 +12,12 @@ pub async fn handle_clear(
     _cmd: Command,
     state: Arc<BotState>,
 ) -> Result<()> {
+    debug!(
+        chat_id = msg.chat.id.0,
+        topic_id = ?msg.thread_id.map(|t| t.0 .0),
+        sender_id = ?msg.from.as_ref().map(|u| u.id.0),
+        "Handling /clear"
+    );
     let chat_id = msg.chat.id;
 
     let topic_store = state.topic_store.lock().await;
@@ -19,6 +26,7 @@ pub async fn handle_clear(
         .await
         .map_err(|e| OutpostError::database_error(e.to_string()))?;
     drop(topic_store);
+    debug!(stale_count = stale_mappings.len(), "Stale mappings found");
 
     let mut cleared_projects = Vec::new();
 
@@ -31,6 +39,7 @@ pub async fn handle_clear(
                 .map_err(|e| OutpostError::database_error(e.to_string()))?
             {
                 if instance_info.instance_type == InstanceType::Managed {
+                    debug!(instance_id = %instance_id, "Stopping stale managed instance");
                     let _ = store
                         .update_state(instance_id, crate::types::instance::InstanceState::Stopped)
                         .await;
@@ -45,9 +54,14 @@ pub async fn handle_clear(
             .await
             .map_err(|e| OutpostError::database_error(e.to_string()))?;
         drop(topic_store);
+        debug!(topic_id = mapping.topic_id, "Stale mapping deleted");
 
         cleared_projects.push(mapping.project_path);
     }
+    debug!(
+        cleared_count = cleared_projects.len(),
+        "Clear operation complete"
+    );
 
     let response = if cleared_projects.is_empty() {
         "Cleanup Complete\n\nNo stale mappings found.".to_string()

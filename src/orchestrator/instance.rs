@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
+use tracing::debug;
 
 /// Default timeout for graceful shutdown before SIGKILL.
 const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
@@ -50,6 +51,13 @@ impl OpenCodeInstance {
     /// * `Ok(Self)` - Instance spawned successfully
     /// * `Err(_)` - Failed to spawn process
     pub async fn spawn(config: InstanceConfig, port: u16) -> Result<Self> {
+        debug!(
+            instance_id = %config.id,
+            project_path = %config.project_path,
+            port = port,
+            "Spawning OpenCode instance"
+        );
+
         let state = Arc::new(Mutex::new(InstanceState::Starting));
         let child_holder = Arc::new(Mutex::new(None::<Child>));
         let session_id = Arc::new(Mutex::new(None::<String>));
@@ -73,6 +81,12 @@ impl OpenCodeInstance {
         })?;
 
         let child_pid = child.id();
+        debug!(
+            instance_id = %config.id,
+            pid = ?child_pid,
+            "OpenCode process spawned successfully"
+        );
+
         {
             let mut pid_guard = pid_holder.lock().await;
             *pid_guard = child_pid;
@@ -114,6 +128,13 @@ impl OpenCodeInstance {
     /// * `port` - Port the external instance is listening on
     /// * `pid` - Optional PID of the external process
     pub fn external(config: InstanceConfig, port: u16, pid: Option<u32>) -> Result<Self> {
+        debug!(
+            instance_id = %config.id,
+            port = port,
+            pid = ?pid,
+            "Creating external instance"
+        );
+
         let http_client = reqwest::Client::builder()
             .timeout(HEALTH_CHECK_TIMEOUT)
             .build()
@@ -141,11 +162,35 @@ impl OpenCodeInstance {
     /// * `Err(_)` - HTTP request failed
     pub async fn health_check(&self) -> Result<bool> {
         let url = format!("http://localhost:{}/global/health", self.port);
+        debug!(instance_id = %self.id, url = %url, "Checking instance health");
 
         match self.http_client.get(&url).send().await {
-            Ok(response) => Ok(response.status().is_success()),
-            Err(e) if e.is_connect() || e.is_timeout() => Ok(false),
-            Err(e) => Err(anyhow!("Health check failed: {}", e)),
+            Ok(response) => {
+                let is_healthy = response.status().is_success();
+                debug!(
+                    instance_id = %self.id,
+                    healthy = is_healthy,
+                    status = response.status().as_u16(),
+                    "Health check result"
+                );
+                Ok(is_healthy)
+            }
+            Err(e) if e.is_connect() || e.is_timeout() => {
+                debug!(
+                    instance_id = %self.id,
+                    reason = "connection timeout",
+                    "Health check failed"
+                );
+                Ok(false)
+            }
+            Err(e) => {
+                debug!(
+                    instance_id = %self.id,
+                    error = %e,
+                    "Health check error"
+                );
+                Err(anyhow!("Health check failed: {}", e))
+            }
         }
     }
 
@@ -159,6 +204,8 @@ impl OpenCodeInstance {
     /// * `Ok(())` - Instance stopped successfully
     /// * `Err(_)` - Failed to stop instance
     pub async fn stop(&self) -> Result<()> {
+        debug!(instance_id = %self.id, "Stopping instance");
+
         {
             let mut state_guard = self.state.lock().await;
             *state_guard = InstanceState::Stopping;
@@ -174,6 +221,7 @@ impl OpenCodeInstance {
                 if let Some(pid) = pid {
                     use std::process::Command as StdCommand;
 
+                    debug!(instance_id = %self.id, pid = pid, "Sending SIGTERM");
                     let _ = StdCommand::new("kill")
                         .arg("-TERM")
                         .arg(pid.to_string())
@@ -193,15 +241,28 @@ impl OpenCodeInstance {
                     .await;
 
                     if graceful_exit.is_err() || !graceful_exit.unwrap() {
+                        debug!(
+                            instance_id = %self.id,
+                            pid = pid,
+                            "Graceful shutdown timeout, sending SIGKILL"
+                        );
                         let _ = child.kill().await;
+                    } else {
+                        debug!(
+                            instance_id = %self.id,
+                            pid = pid,
+                            "Process exited gracefully"
+                        );
                     }
                 } else {
+                    debug!(instance_id = %self.id, "No PID available, killing process");
                     let _ = child.kill().await;
                 }
             }
 
             #[cfg(not(unix))]
             {
+                debug!(instance_id = %self.id, "Killing process (non-Unix)");
                 let _ = child.kill().await;
             }
 
@@ -220,6 +281,7 @@ impl OpenCodeInstance {
             *pid_guard = None;
         }
 
+        debug!(instance_id = %self.id, "Instance stopped");
         Ok(())
     }
 
@@ -287,6 +349,11 @@ impl OpenCodeInstance {
             match child.try_wait() {
                 Ok(Some(status)) => {
                     if !status.success() {
+                        debug!(
+                            instance_id = %self.id,
+                            exit_status = ?status,
+                            "Process crashed detected"
+                        );
                         let mut state_guard = self.state.lock().await;
                         *state_guard = InstanceState::Error;
                         drop(child_guard);
@@ -296,15 +363,23 @@ impl OpenCodeInstance {
 
                         return Ok(true);
                     } else {
+                        debug!(
+                            instance_id = %self.id,
+                            "Process exited cleanly"
+                        );
                         let mut state_guard = self.state.lock().await;
                         *state_guard = InstanceState::Stopped;
                     }
                     Ok(false)
                 }
-                Ok(None) => Ok(false),
+                Ok(None) => {
+                    debug!(instance_id = %self.id, "Process still running");
+                    Ok(false)
+                }
                 Err(e) => Err(anyhow!("Failed to check process status: {}", e)),
             }
         } else {
+            debug!(instance_id = %self.id, "No child process to check");
             Ok(false)
         }
     }
@@ -322,14 +397,42 @@ impl OpenCodeInstance {
     /// * `Ok(false)` - Timeout reached without instance becoming ready
     pub async fn wait_for_ready(&self, timeout: Duration, poll_interval: Duration) -> Result<bool> {
         let start = std::time::Instant::now();
+        let mut poll_count = 0;
+
+        debug!(
+            instance_id = %self.id,
+            timeout_secs = timeout.as_secs(),
+            poll_interval_ms = poll_interval.as_millis(),
+            "Starting readiness polling"
+        );
 
         while start.elapsed() < timeout {
+            poll_count += 1;
+            debug!(
+                instance_id = %self.id,
+                poll_number = poll_count,
+                elapsed_ms = start.elapsed().as_millis(),
+                "Polling instance readiness"
+            );
+
             if self.health_check().await? {
+                debug!(
+                    instance_id = %self.id,
+                    poll_count = poll_count,
+                    total_wait_ms = start.elapsed().as_millis(),
+                    "Instance became ready"
+                );
                 return Ok(true);
             }
             tokio::time::sleep(poll_interval).await;
         }
 
+        debug!(
+            instance_id = %self.id,
+            poll_count = poll_count,
+            timeout_ms = timeout.as_millis(),
+            "Instance readiness timeout"
+        );
         Ok(false)
     }
 }

@@ -2,6 +2,7 @@ use anyhow::Result;
 use sqlx::sqlite::SqlitePool;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::debug;
 
 use super::init_log_db;
 
@@ -13,6 +14,8 @@ pub struct LogStore {
 impl LogStore {
     pub async fn new(db_path: &Path) -> Result<Self> {
         let pool = init_log_db(db_path).await?;
+        // NOTE: This log may not appear at startup since tracing isn't initialized yet.
+        debug!(db_path = %db_path.display(), "Log store initialized");
         Ok(Self { pool })
     }
 
@@ -22,6 +25,7 @@ impl LogStore {
         version: &str,
         config_summary: Option<&str>,
     ) -> Result<()> {
+        debug!(run_id = %run_id, version = %version, "Creating run record");
         let now = now_millis();
 
         sqlx::query(
@@ -39,6 +43,7 @@ impl LogStore {
     }
 
     pub async fn finish_run(&self, run_id: &str) -> Result<()> {
+        debug!(run_id = %run_id, "Finishing run record");
         let now = now_millis();
 
         sqlx::query("UPDATE bot_runs SET stopped_at = ? WHERE run_id = ?")
@@ -50,6 +55,9 @@ impl LogStore {
         Ok(())
     }
 
+    // NOTE: Do NOT add tracing/logging calls to this method.
+    // This method is called by DatabaseLayer::on_event() for every log event.
+    // Adding a log call here would cause infinite recursion.
     pub async fn insert_log(
         &self,
         run_id: &str,

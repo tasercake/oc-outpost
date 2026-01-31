@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use std::path::PathBuf;
 use std::time::Duration;
+use tracing::debug;
 
 /// Configuration for oc-outpost loaded from environment variables
 #[derive(Debug, Clone)]
@@ -133,6 +134,26 @@ impl Config {
             .map_err(|_| anyhow!("API_PORT must be a valid port number"))?;
 
         let api_key = std::env::var("API_KEY").ok();
+
+        debug!(
+            opencode_path = ?opencode_path,
+            max_instances = opencode_max_instances,
+            port_start = opencode_port_start,
+            port_pool_size = opencode_port_pool_size,
+            idle_timeout_ms = opencode_idle_timeout.as_millis() as u64,
+            health_check_interval_ms = opencode_health_check_interval.as_millis() as u64,
+            startup_timeout_ms = opencode_startup_timeout.as_millis() as u64,
+            orchestrator_db = %orchestrator_db_path.display(),
+            topic_db = %topic_db_path.display(),
+            log_db = %log_db_path.display(),
+            project_base = %project_base_path.display(),
+            auto_create_dirs = auto_create_project_dirs,
+            api_port = api_port,
+            has_api_key = api_key.is_some(),
+            allowed_users_count = telegram_allowed_users.len(),
+            handle_general_topic = handle_general_topic,
+            "Config resolved from environment"
+        );
 
         Ok(Config {
             telegram_bot_token,

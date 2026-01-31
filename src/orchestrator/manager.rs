@@ -20,6 +20,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
+use tracing::debug;
 
 /// Maximum number of restart attempts before giving up.
 const MAX_RESTART_ATTEMPTS: usize = 5;
@@ -120,16 +121,20 @@ impl InstanceManager {
             .to_str()
             .ok_or_else(|| anyhow!("Invalid project path"))?;
 
+        debug!(project_path = %path_str, "get_or_create: looking up instance");
+
         // Check if instance already exists in memory
         if let Some(instance) = self.get_instance_by_path(project_path).await {
             let inst = instance.lock().await;
             match inst.state().await {
                 InstanceState::Running | InstanceState::Starting => {
+                    debug!(project_path = %path_str, "Returning existing running instance");
                     drop(inst);
                     self.record_activity(path_str).await;
                     return Ok(instance);
                 }
                 InstanceState::Stopped | InstanceState::Error => {
+                    debug!(project_path = %path_str, "Instance stopped/error, attempting restart");
                     drop(inst);
                     // Try to restart
                     return self.restart_instance_by_path(project_path).await;
@@ -143,6 +148,7 @@ impl InstanceManager {
         // Check database for persisted instance
         let store = self.store.lock().await;
         if let Some(info) = store.get_instance_by_path(path_str).await? {
+            debug!(project_path = %path_str, instance_id = %info.id, state = ?info.state, "Found instance in database but not memory");
             drop(store);
             // Instance exists in DB but not in memory, try to recover
             if info.state == InstanceState::Running || info.state == InstanceState::Starting {
@@ -150,11 +156,17 @@ impl InstanceManager {
                 return self.restore_instance(&info).await;
             }
         } else {
+            debug!(project_path = %path_str, "No instance found in memory or database");
             drop(store);
         }
 
         // Check max instances limit
         let instances = self.instances.lock().await;
+        debug!(
+            current_count = instances.len(),
+            max = self.config.opencode_max_instances,
+            "Checking instance limit"
+        );
         if instances.len() >= self.config.opencode_max_instances {
             return Err(anyhow!(
                 "Maximum instances limit reached ({})",
@@ -164,6 +176,7 @@ impl InstanceManager {
         drop(instances);
 
         // Create new instance
+        debug!(project_path = %path_str, "Spawning new instance");
         self.spawn_new_instance(project_path).await
     }
 
@@ -191,6 +204,7 @@ impl InstanceManager {
 
     /// Stop a specific instance by ID.
     pub async fn stop_instance(&self, id: &str) -> Result<()> {
+        debug!(instance_id = %id, "Stopping instance");
         let instance = {
             let instances = self.instances.lock().await;
             instances.get(id).cloned()
@@ -202,6 +216,8 @@ impl InstanceManager {
             inst.stop().await?;
             drop(inst);
 
+            debug!(instance_id = %id, port = port, "Instance stopped, releasing port");
+
             // Release port back to pool
             self.port_pool.release(port).await;
 
@@ -210,6 +226,7 @@ impl InstanceManager {
 
             let mut instances = self.instances.lock().await;
             instances.remove(id);
+            debug!(instance_id = %id, "Instance removed from tracking");
 
             let mut restart_trackers = self.restart_trackers.lock().await;
             restart_trackers.remove(id);
@@ -234,6 +251,8 @@ impl InstanceManager {
             let instances = self.instances.lock().await;
             instances.keys().cloned().collect()
         };
+
+        debug!(count = instance_ids.len(), "Stopping all instances");
 
         let mut errors = Vec::new();
         for id in instance_ids {
@@ -284,11 +303,18 @@ impl InstanceManager {
     ///
     /// Attempts to restore instances that were running before shutdown.
     pub async fn recover_from_db(&self) -> Result<()> {
+        debug!("Starting instance recovery from database");
         let store = self.store.lock().await;
         let all_instances = store.get_all_instances().await?;
         drop(store);
 
+        debug!(
+            instance_count = all_instances.len(),
+            "Found instances in database for recovery"
+        );
+
         for info in all_instances {
+            debug!(instance_id = %info.id, state = ?info.state, "Evaluating instance for recovery");
             if info.state == InstanceState::Running || info.state == InstanceState::Starting {
                 // Try to restore instance
                 if let Err(e) = self.restore_instance(&info).await {
@@ -304,6 +330,7 @@ impl InstanceManager {
             }
         }
 
+        debug!("Instance recovery complete");
         Ok(())
     }
 
@@ -323,6 +350,10 @@ impl InstanceManager {
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(config.opencode_health_check_interval);
+            debug!(
+                interval_ms = config.opencode_health_check_interval.as_millis() as u64,
+                "Health check loop started"
+            );
 
             loop {
                 interval.tick().await;
@@ -340,6 +371,8 @@ impl InstanceManager {
                     let instances = instances.lock().await;
                     instances.keys().cloned().collect()
                 };
+
+                debug!(instance_count = instance_ids.len(), "Health check tick");
 
                 for id in instance_ids {
                     let instance = {
@@ -558,6 +591,7 @@ impl InstanceManager {
                             }
                             Ok(false) => {
                                 // Instance is healthy, reset restart tracker
+                                debug!(instance_id = %id, "Instance healthy, restart tracker reset");
                                 let mut trackers = restart_trackers.lock().await;
                                 trackers.remove(&id);
                                 drop(inst);
@@ -576,6 +610,7 @@ impl InstanceManager {
 
                         if let Some(activity) = activity {
                             if activity.last_activity.elapsed() > config.opencode_idle_timeout {
+                                debug!(instance_id = %id, idle_secs = activity.last_activity.elapsed().as_secs(), timeout_secs = config.opencode_idle_timeout.as_secs(), "Idle timeout check");
                                 tracing::info!("Instance {} idle timeout reached, stopping", id);
                                 let instance = {
                                     let instances = instances.lock().await;
@@ -612,6 +647,7 @@ impl InstanceManager {
 
     /// Record activity for an instance (for idle timeout tracking).
     pub async fn record_activity(&self, id: &str) {
+        debug!(instance_id = %id, "Activity recorded for instance");
         let mut activity_trackers = self.activity_trackers.lock().await;
         let tracker = activity_trackers.entry(id.to_string()).or_default();
         tracker.last_activity = Instant::now();
@@ -628,12 +664,14 @@ impl InstanceManager {
 
         // Allocate port
         let port = self.port_pool.allocate().await?;
+        debug!(port = port, project_path = %path_str, "Port allocated for new instance");
 
         // Generate unique ID
         let id = format!(
             "inst_{}",
             uuid::Uuid::new_v4().to_string().split('-').next().unwrap()
         );
+        debug!(instance_id = %id, port = port, "Spawning OpenCode instance");
 
         // Create config
         let instance_config = InstanceConfig {
@@ -654,6 +692,8 @@ impl InstanceManager {
             }
         };
 
+        debug!(instance_id = %id, "Process spawned, waiting for readiness");
+
         let instance = Arc::new(Mutex::new(instance));
 
         // Wait for instance to be ready
@@ -665,6 +705,8 @@ impl InstanceManager {
                     Duration::from_millis(500),
                 )
                 .await?;
+
+            debug!(instance_id = %id, ready = ready, "Readiness check result");
 
             if !ready {
                 inst.stop().await?;
@@ -694,10 +736,12 @@ impl InstanceManager {
         let store = self.store.lock().await;
         store.save_instance(&info, None).await?;
         drop(store);
+        debug!(instance_id = %id, "Instance saved to database");
 
         // Add to instances map
         let mut instances = self.instances.lock().await;
         instances.insert(id.clone(), instance.clone());
+        debug!(instance_id = %id, "Instance added to active map");
 
         // Initialize activity tracker
         let mut activity_trackers = self.activity_trackers.lock().await;
@@ -715,6 +759,8 @@ impl InstanceManager {
             .to_str()
             .ok_or_else(|| anyhow!("Invalid project path"))?;
 
+        debug!(project_path = %path_str, "Restart requested");
+
         // Get existing instance
         let (id, old_port) = {
             if let Some(instance) = self.get_instance_by_path(project_path).await {
@@ -724,6 +770,8 @@ impl InstanceManager {
                 return Err(anyhow!("Instance not found for path: {}", path_str));
             }
         };
+
+        debug!(instance_id = %id, old_port = old_port, "Found instance to restart");
 
         // Check restart tracker
         let mut trackers = self.restart_trackers.lock().await;
@@ -737,9 +785,12 @@ impl InstanceManager {
         }
 
         let delay = INITIAL_RESTART_DELAY.mul_f64(2_f64.powi(tracker.attempt as i32));
+        let attempt = tracker.attempt;
         tracker.attempt += 1;
         tracker.last_attempt = Some(Instant::now());
         drop(trackers);
+
+        debug!(instance_id = %id, attempt = attempt, delay_ms = delay.as_millis() as u64, "Restart backoff");
 
         // Wait for backoff delay
         tokio::time::sleep(delay).await;
@@ -756,9 +807,11 @@ impl InstanceManager {
 
     /// Restore an instance from database info.
     async fn restore_instance(&self, info: &InstanceInfo) -> Result<Arc<Mutex<OpenCodeInstance>>> {
+        debug!(instance_id = %info.id, port = info.port, "Attempting instance restore");
         let project_path = Path::new(&info.project_path);
 
         // Check if port is available
+        debug!(port = info.port, "Checking port availability for restore");
         if !self.port_pool.is_available(info.port).await {
             // Port is in use, need to allocate new port
             return self.spawn_new_instance(project_path).await;
@@ -778,6 +831,7 @@ impl InstanceManager {
         // Check health
         if instance.health_check().await? {
             // Instance is still running
+            debug!(instance_id = %info.id, "Restored instance healthy");
             let instance = Arc::new(Mutex::new(instance));
             let mut instances = self.instances.lock().await;
             instances.insert(info.id.clone(), instance.clone());
@@ -789,6 +843,7 @@ impl InstanceManager {
             Ok(instance)
         } else {
             // Instance is not running, spawn new
+            debug!(instance_id = %info.id, "Restored instance unhealthy, spawning new");
             self.spawn_new_instance(project_path).await
         }
     }

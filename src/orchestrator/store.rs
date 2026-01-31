@@ -4,6 +4,7 @@ use anyhow::Result;
 use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
 use std::path::Path;
+use tracing::debug;
 
 #[cfg(test)]
 use crate::types::instance::InstanceType;
@@ -24,6 +25,13 @@ impl OrchestratorStore {
         instance: &InstanceInfo,
         session_id: Option<&str>,
     ) -> Result<()> {
+        debug!(
+            instance_id = %instance.id,
+            state = ?instance.state,
+            port = instance.port,
+            "Saving instance to DB"
+        );
+
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_millis() as i64;
@@ -41,8 +49,8 @@ impl OrchestratorStore {
 
         sqlx::query(
             "INSERT OR REPLACE INTO instances 
-             (id, project_path, port, state, instance_type, session_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+              (id, project_path, port, state, instance_type, session_id, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&instance.id)
         .bind(&instance.project_path)
@@ -59,12 +67,20 @@ impl OrchestratorStore {
     }
 
     pub async fn get_instance(&self, id: &str) -> Result<Option<InstanceInfo>> {
+        debug!(instance_id = %id, "Querying instance from DB");
+
         let row = sqlx::query("SELECT * FROM instances WHERE id = ?")
             .bind(id)
             .fetch_optional(&self.pool)
             .await?;
 
-        row.map(|r| self.row_to_instance(r)).transpose()
+        let result = row.map(|r| self.row_to_instance(r)).transpose()?;
+        debug!(
+            instance_id = %id,
+            found = result.is_some(),
+            "Instance query result"
+        );
+        Ok(result)
     }
 
     #[allow(dead_code)]
@@ -79,23 +95,42 @@ impl OrchestratorStore {
     }
 
     pub async fn get_instance_by_path(&self, path: &str) -> Result<Option<InstanceInfo>> {
+        debug!(project_path = %path, "Querying instance by path from DB");
+
         let row = sqlx::query("SELECT * FROM instances WHERE project_path = ?")
             .bind(path)
             .fetch_optional(&self.pool)
             .await?;
 
-        row.map(|r| self.row_to_instance(r)).transpose()
+        let result = row.map(|r| self.row_to_instance(r)).transpose()?;
+        debug!(
+            project_path = %path,
+            found = result.is_some(),
+            "Instance by path query result"
+        );
+        Ok(result)
     }
 
     pub async fn get_all_instances(&self) -> Result<Vec<InstanceInfo>> {
+        debug!("Querying all instances from DB");
+
         let rows = sqlx::query("SELECT * FROM instances ORDER BY created_at DESC")
             .fetch_all(&self.pool)
             .await?;
 
-        rows.into_iter().map(|r| self.row_to_instance(r)).collect()
+        let count = rows.len();
+        let result: Result<Vec<_>> = rows.into_iter().map(|r| self.row_to_instance(r)).collect();
+        debug!(instance_count = count, "Retrieved all instances from DB");
+        result
     }
 
     pub async fn update_state(&self, id: &str, state: InstanceState) -> Result<()> {
+        debug!(
+            instance_id = %id,
+            new_state = ?state,
+            "Updating instance state in DB"
+        );
+
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_millis() as i64;
@@ -111,6 +146,8 @@ impl OrchestratorStore {
     }
 
     pub async fn delete_instance(&self, id: &str) -> Result<()> {
+        debug!(instance_id = %id, "Deleting instance from DB");
+
         sqlx::query("DELETE FROM instances WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
@@ -122,15 +159,18 @@ impl OrchestratorStore {
     #[allow(dead_code)]
     // Used by future: active instance counting feature
     pub async fn get_active_count(&self) -> Result<usize> {
+        debug!("Querying active instance count from DB");
+
         let row = sqlx::query(
             "SELECT COUNT(*) as count FROM instances 
-             WHERE state != ?",
+              WHERE state != ?",
         )
         .bind(serde_json::to_string(&InstanceState::Stopped)?)
         .fetch_one(&self.pool)
         .await?;
 
         let count: i64 = row.get("count");
+        debug!(active_count = count, "Retrieved active instance count");
         Ok(count as usize)
     }
 

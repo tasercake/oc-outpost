@@ -140,6 +140,7 @@ impl StreamHandler {
     /// Returns a channel receiver for stream events.
     pub async fn subscribe(&self, session_id: &str) -> Result<mpsc::Receiver<StreamEvent>> {
         let url = self.client.sse_url(session_id);
+        debug!(session_id = %session_id, url = %url, "Creating SSE subscription");
         let session_id = session_id.to_string();
         let (tx, rx) = mpsc::channel(100);
         let (cancel_tx, cancel_rx) = oneshot::channel();
@@ -150,6 +151,8 @@ impl StreamHandler {
         let task_handle = tokio::spawn(async move {
             Self::run_stream_loop(url, session_id_clone, tx, cancel_rx, telegram_messages).await;
         });
+
+        debug!(session_id = %session_id, "SSE stream task spawned");
 
         {
             let mut subs = self.subscriptions.lock().unwrap();
@@ -167,6 +170,7 @@ impl StreamHandler {
 
     /// Mark a message as sent from Telegram (for deduplication).
     pub fn mark_from_telegram(&self, session_id: &str, text: &str) {
+        debug!(session_id = %session_id, text_len = text.len(), "Marking text as from Telegram for dedup");
         let session_id = session_id.to_string();
         let text = text.to_string();
         let telegram_messages = Arc::clone(&self.telegram_messages);
@@ -400,6 +404,11 @@ impl StreamHandler {
                         // Batch text chunks
                         text_batch.push_str(&text);
                         *last_batch_time = Instant::now();
+                        debug!(
+                            text_len = text.len(),
+                            batch_len = text_batch.len(),
+                            "Text chunk added to batch"
+                        );
                     }
                     MessagePartData::ToolUse { name, input } => {
                         // Flush text batch before tool use
@@ -410,6 +419,7 @@ impl StreamHandler {
                             .await
                             .ok();
                         }
+                        debug!(tool_name = %name, "Tool invocation parsed");
                         tx.send(StreamEvent::ToolInvocation { name, args: input })
                             .await
                             .ok();
@@ -423,6 +433,7 @@ impl StreamHandler {
                             .await
                             .ok();
                         }
+                        debug!(result_len = content.len(), "Tool result parsed");
                         tx.send(StreamEvent::ToolResult { result: content })
                             .await
                             .ok();
@@ -442,6 +453,7 @@ impl StreamHandler {
 
                 let message: OpenCodeMessage =
                     serde_json::from_str(data).context("Failed to parse message.updated")?;
+                debug!(message_id = %message.id, role = %message.role, "Message complete parsed");
                 tx.send(StreamEvent::MessageComplete { message }).await.ok();
             }
 
@@ -454,12 +466,14 @@ impl StreamHandler {
                     .await
                     .ok();
                 }
+                debug!("Session idle parsed");
                 tx.send(StreamEvent::SessionIdle).await.ok();
             }
 
             "session.error" => {
                 let error_data: SessionErrorData =
                     serde_json::from_str(data).context("Failed to parse session.error")?;
+                debug!(error = %error_data.message, "Session error parsed");
                 tx.send(StreamEvent::SessionError {
                     error: error_data.message,
                 })
@@ -470,6 +484,7 @@ impl StreamHandler {
             "permission.updated" => {
                 let perm: PermissionUpdatedData =
                     serde_json::from_str(data).context("Failed to parse permission.updated")?;
+                debug!(permission_id = %perm.id, permission_type = %perm.permission_type, "Permission request parsed");
                 tx.send(StreamEvent::PermissionRequest {
                     id: perm.id,
                     permission_type: perm.permission_type,
@@ -482,6 +497,7 @@ impl StreamHandler {
             "permission.replied" => {
                 let reply: PermissionRepliedData =
                     serde_json::from_str(data).context("Failed to parse permission.replied")?;
+                debug!(permission_id = %reply.id, allowed = reply.allowed, "Permission reply parsed");
                 tx.send(StreamEvent::PermissionReply {
                     id: reply.id,
                     allowed: reply.allowed,

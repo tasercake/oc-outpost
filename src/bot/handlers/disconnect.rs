@@ -4,7 +4,7 @@ use crate::types::instance::InstanceType;
 use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::{MessageId, ThreadId};
-use tracing::warn;
+use tracing::{debug, warn};
 
 /// Extract topic_id from message, ensuring it's not the General topic
 fn get_topic_id(msg: &Message) -> Result<i32> {
@@ -28,6 +28,12 @@ pub async fn handle_disconnect(
     _cmd: Command,
     state: Arc<BotState>,
 ) -> Result<()> {
+    debug!(
+        chat_id = msg.chat.id.0,
+        topic_id = ?msg.thread_id.map(|t| t.0 .0),
+        sender_id = ?msg.from.as_ref().map(|u| u.id.0),
+        "Handling /disconnect"
+    );
     let topic_id = get_topic_id(&msg)?;
     let chat_id = msg.chat.id;
 
@@ -38,6 +44,7 @@ pub async fn handle_disconnect(
         .map_err(|e| OutpostError::database_error(e.to_string()))?
         .ok_or_else(|| OutpostError::telegram_error("No active connection in this topic"))?;
     drop(topic_store);
+    debug!(topic_id = topic_id, session_id = ?mapping.session_id, instance_id = ?mapping.instance_id, "Mapping found for disconnect");
 
     if let Some(instance_id) = &mapping.instance_id {
         let store = state.orchestrator_store.lock().await;
@@ -48,6 +55,7 @@ pub async fn handle_disconnect(
         {
             drop(store);
             if instance_info.instance_type == InstanceType::Managed {
+                debug!(instance_id = %instance_id, "Stopping managed instance");
                 if let Err(e) = state.instance_manager.stop_instance(instance_id).await {
                     warn!("Failed to stop instance {}: {:?}", instance_id, e);
                 }
@@ -71,6 +79,7 @@ pub async fn handle_disconnect(
         .await
         .map_err(|e| OutpostError::database_error(e.to_string()))?;
     drop(topic_store);
+    debug!(topic_id = topic_id, "Mapping deleted from database");
 
     bot.delete_forum_topic(chat_id, ThreadId(MessageId(topic_id)))
         .await

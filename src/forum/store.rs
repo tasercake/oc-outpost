@@ -4,6 +4,7 @@ use anyhow::{anyhow, Result};
 use sqlx::{Row, SqlitePool};
 use std::path::Path;
 use std::time::Duration;
+use tracing::debug;
 
 pub struct TopicStore {
     pool: SqlitePool,
@@ -12,10 +13,12 @@ pub struct TopicStore {
 impl TopicStore {
     pub async fn new(db_path: &Path) -> Result<Self> {
         let pool = init_topics_db(db_path).await?;
+        debug!(db_path = %db_path.display(), "Topic store initialized");
         Ok(Self { pool })
     }
 
     pub async fn save_mapping(&self, mapping: &TopicMapping) -> Result<()> {
+        debug!(topic_id = mapping.topic_id, chat_id = mapping.chat_id, session_id = ?mapping.session_id, instance_id = ?mapping.instance_id, "Saving topic mapping");
         sqlx::query(
             "INSERT INTO topic_mappings 
              (topic_id, chat_id, project_path, session_id, instance_id, 
@@ -46,6 +49,7 @@ impl TopicStore {
     }
 
     pub async fn get_mapping(&self, topic_id: i32) -> Result<Option<TopicMapping>> {
+        debug!(topic_id = topic_id, "Looking up topic mapping");
         let row = sqlx::query(
             "SELECT topic_id, chat_id, project_path, session_id, instance_id,
                     streaming_enabled, topic_name_updated, created_at, updated_at
@@ -55,7 +59,7 @@ impl TopicStore {
         .fetch_optional(&self.pool)
         .await?;
 
-        match row {
+        let result = match row {
             Some(row) => Ok(Some(TopicMapping {
                 topic_id: row.get(0),
                 chat_id: row.get(1),
@@ -68,10 +72,17 @@ impl TopicStore {
                 updated_at: row.get(8),
             })),
             None => Ok(None),
-        }
+        };
+        debug!(
+            topic_id = topic_id,
+            found = result.is_ok() && result.as_ref().unwrap().is_some(),
+            "Topic mapping lookup result"
+        );
+        result
     }
 
     pub async fn get_mappings_by_chat(&self, chat_id: i64) -> Result<Vec<TopicMapping>> {
+        debug!(chat_id = chat_id, "Looking up mappings by chat");
         let rows = sqlx::query(
             "SELECT topic_id, chat_id, project_path, session_id, instance_id,
                     streaming_enabled, topic_name_updated, created_at, updated_at
@@ -81,7 +92,7 @@ impl TopicStore {
         .fetch_all(&self.pool)
         .await?;
 
-        let mappings = rows
+        let mappings: Vec<TopicMapping> = rows
             .into_iter()
             .map(|row| TopicMapping {
                 topic_id: row.get(0),
@@ -96,10 +107,16 @@ impl TopicStore {
             })
             .collect();
 
+        debug!(
+            chat_id = chat_id,
+            count = mappings.len(),
+            "Chat mappings found"
+        );
         Ok(mappings)
     }
 
     pub async fn get_mapping_by_session(&self, session_id: &str) -> Result<Option<TopicMapping>> {
+        debug!(session_id = %session_id, "Looking up mapping by session");
         let row = sqlx::query(
             "SELECT topic_id, chat_id, project_path, session_id, instance_id,
                     streaming_enabled, topic_name_updated, created_at, updated_at
@@ -128,6 +145,7 @@ impl TopicStore {
     #[allow(dead_code)]
     // Used by future: session update feature
     pub async fn update_session(&self, topic_id: i32, session_id: &str) -> Result<()> {
+        debug!(topic_id = topic_id, session_id = %session_id, "Updating session_id in mapping");
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs() as i64;
@@ -149,6 +167,7 @@ impl TopicStore {
     }
 
     pub async fn toggle_streaming(&self, topic_id: i32) -> Result<bool> {
+        debug!(topic_id = topic_id, "Toggling streaming state");
         let current = self
             .get_mapping(topic_id)
             .await?
@@ -168,10 +187,16 @@ impl TopicStore {
         .execute(&self.pool)
         .await?;
 
+        debug!(
+            topic_id = topic_id,
+            new_state = new_value,
+            "Streaming toggled"
+        );
         Ok(new_value)
     }
 
     pub async fn mark_topic_name_updated(&self, topic_id: i32) -> Result<()> {
+        debug!(topic_id = topic_id, "Marking topic name as updated");
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs() as i64;
@@ -192,6 +217,7 @@ impl TopicStore {
     }
 
     pub async fn delete_mapping(&self, topic_id: i32) -> Result<()> {
+        debug!(topic_id = topic_id, "Deleting topic mapping");
         sqlx::query("DELETE FROM topic_mappings WHERE topic_id = ?")
             .bind(topic_id)
             .execute(&self.pool)
@@ -201,6 +227,7 @@ impl TopicStore {
     }
 
     pub async fn get_stale_mappings(&self, older_than: Duration) -> Result<Vec<TopicMapping>> {
+        debug!("Looking up stale mappings");
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs() as i64;
@@ -216,7 +243,7 @@ impl TopicStore {
         .fetch_all(&self.pool)
         .await?;
 
-        let mappings = rows
+        let mappings: Vec<TopicMapping> = rows
             .into_iter()
             .map(|row| TopicMapping {
                 topic_id: row.get(0),
@@ -231,6 +258,7 @@ impl TopicStore {
             })
             .collect();
 
+        debug!(count = mappings.len(), "Stale mappings found");
         Ok(mappings)
     }
 }

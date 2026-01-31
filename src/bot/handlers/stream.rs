@@ -3,6 +3,7 @@ use crate::types::error::{OutpostError, Result};
 use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::{MessageId, ThreadId};
+use tracing::debug;
 
 /// Extract topic_id from message, ensuring it's not the General topic
 fn get_topic_id(msg: &Message) -> Result<i32> {
@@ -35,6 +36,12 @@ pub async fn handle_stream(
     _cmd: Command,
     state: Arc<BotState>,
 ) -> Result<()> {
+    debug!(
+        chat_id = msg.chat.id.0,
+        topic_id = ?msg.thread_id.map(|t| t.0 .0),
+        sender_id = ?msg.from.as_ref().map(|u| u.id.0),
+        "Handling /stream"
+    );
     let topic_id = get_topic_id(&msg)?;
     let chat_id = msg.chat.id;
 
@@ -54,6 +61,11 @@ pub async fn handle_stream(
         .await
         .map_err(|e| OutpostError::database_error(e.to_string()))?;
     drop(topic_store);
+    debug!(
+        topic_id = topic_id,
+        streaming_enabled = new_state,
+        "Streaming toggled"
+    );
 
     // Send confirmation message
     let confirmation = format_confirmation(new_state);

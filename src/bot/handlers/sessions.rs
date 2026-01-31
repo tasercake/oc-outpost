@@ -11,6 +11,7 @@ use crate::types::error::Result;
 use std::path::Path;
 use std::sync::Arc;
 use teloxide::prelude::*;
+use tracing::debug;
 
 const MAX_SESSIONS_PER_PAGE: usize = 10;
 
@@ -156,8 +157,21 @@ pub async fn handle_sessions(
     _cmd: Command,
     state: Arc<BotState>,
 ) -> Result<()> {
+    debug!(
+        chat_id = msg.chat.id.0,
+        topic_id = ?msg.thread_id.map(|t| t.0 .0),
+        sender_id = ?msg.from.as_ref().map(|u| u.id.0),
+        "Handling /sessions"
+    );
     let managed = get_managed_sessions(&state).await.unwrap_or_default();
+    debug!(managed_count = managed.len(), "Managed sessions retrieved");
     let discovered = get_discovered_sessions().await.unwrap_or_default();
+    debug!(
+        discovered_count = discovered.len(),
+        "Discovered sessions retrieved"
+    );
+    let total = managed.len() + discovered.len();
+    debug!(total = total, "Total sessions to display");
     let output = format_sessions(managed, discovered);
 
     bot.send_message(msg.chat.id, output)

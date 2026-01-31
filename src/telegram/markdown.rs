@@ -1,3 +1,5 @@
+use tracing::debug;
+
 /// Convert Markdown to Telegram HTML format
 ///
 /// Supports:
@@ -7,6 +9,10 @@
 /// - Code blocks: ```lang\ncode\n``` → <pre><code class="language-lang">code</code></pre>
 /// - Links: [text](url) → <a href="url">text</a>
 pub fn markdown_to_telegram_html(text: &str) -> String {
+    debug!(
+        input_len = text.len(),
+        "Converting markdown to Telegram HTML"
+    );
     let mut result = String::with_capacity(text.len());
     let chars: Vec<char> = text.chars().collect();
     let mut i = 0;
@@ -168,6 +174,11 @@ pub fn markdown_to_telegram_html(text: &str) -> String {
         i += 1;
     }
 
+    debug!(
+        input_len = text.len(),
+        output_len = result.len(),
+        "Markdown conversion complete"
+    );
     result
 }
 
@@ -189,6 +200,11 @@ fn escape_html(text: &str) -> String {
 #[allow(dead_code)]
 // Used by future: message truncation feature
 pub fn truncate_message(text: &str, max_len: usize) -> String {
+    debug!(
+        input_len = text.len(),
+        max_len = max_len,
+        "Truncating message"
+    );
     if text.len() <= max_len {
         return text.to_string();
     }
@@ -224,13 +240,24 @@ pub fn truncate_message(text: &str, max_len: usize) -> String {
     }
 
     let truncated: String = chars.iter().take(safe_len).collect();
-    format!("{}{}", truncated, ellipsis)
+    let result = format!("{}{}", truncated, ellipsis);
+    debug!(
+        input_len = text.len(),
+        output_len = result.len(),
+        "Message truncation complete"
+    );
+    result
 }
 
 /// Split message into chunks of max_len characters
 ///
 /// Preserves code block integrity. Closes/reopens HTML tags across splits.
 pub fn split_message(text: &str, max_len: usize) -> Vec<String> {
+    debug!(
+        input_len = text.len(),
+        max_len = max_len,
+        "Splitting message for Telegram"
+    );
     if text.len() <= max_len {
         return vec![text.to_string()];
     }
@@ -288,6 +315,7 @@ pub fn split_message(text: &str, max_len: usize) -> Vec<String> {
         parts[i].push_str("...");
     }
 
+    debug!(parts = parts.len(), "Message split complete");
     parts
 }
 

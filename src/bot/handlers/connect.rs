@@ -5,6 +5,7 @@ use crate::types::forum::TopicMapping;
 use std::path::PathBuf;
 use std::sync::Arc;
 use teloxide::prelude::*;
+use tracing::debug;
 
 #[derive(Debug, Clone)]
 struct SessionInfo {
@@ -84,6 +85,13 @@ pub async fn handle_connect(
     let Command::Connect(name) = cmd else {
         return Err(OutpostError::telegram_error("Invalid command"));
     };
+    debug!(
+        chat_id = msg.chat.id.0,
+        topic_id = ?msg.thread_id.map(|t| t.0 .0),
+        sender_id = ?msg.from.as_ref().map(|u| u.id.0),
+        "Handling /connect"
+    );
+    debug!(name = %name, "Connect target extracted");
 
     let chat_id = msg.chat.id;
 
@@ -93,10 +101,18 @@ pub async fn handle_connect(
         .await
         .map_err(|e| OutpostError::database_error(e.to_string()))?;
     drop(topic_store);
+    debug!(
+        existing_count = existing_mappings.len(),
+        "Checked existing mappings"
+    );
 
     let session_info = match find_session(&name, &state).await? {
-        Some(info) => info,
+        Some(info) => {
+            debug!(name = %name, found = true, "Session search result");
+            info
+        }
         None => {
+            debug!(name = %name, found = false, "Session search result");
             bot.send_message(chat_id, format!("Session not found: {}", name))
                 .await
                 .map_err(|e| OutpostError::telegram_error(e.to_string()))?;
@@ -106,6 +122,7 @@ pub async fn handle_connect(
 
     for mapping in existing_mappings {
         if mapping.session_id.as_deref() == Some(&session_info.session_id) {
+            debug!(session_id = %session_info.session_id, "Already connected to this session");
             bot.send_message(
                 chat_id,
                 "Already connected to this session in another topic",
@@ -129,6 +146,10 @@ pub async fn handle_connect(
             )));
         }
     };
+    debug!(
+        topic_id = forum_topic.thread_id.0 .0,
+        "Forum topic created for connection"
+    );
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -153,6 +174,7 @@ pub async fn handle_connect(
         .await
         .map_err(|e| OutpostError::database_error(e.to_string()))?;
     drop(topic_store);
+    debug!(topic_id = mapping.topic_id, session_id = ?mapping.session_id, "Connection mapping saved");
 
     let confirmation = format!(
         "Connected to session {} in project {}",

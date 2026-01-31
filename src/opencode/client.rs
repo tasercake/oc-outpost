@@ -3,6 +3,7 @@ use anyhow::{Context, Result};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use tracing::debug;
 
 /// OpenCode REST API client
 #[derive(Clone)]
@@ -62,6 +63,7 @@ impl OpenCodeClient {
     // Used by future: health monitoring feature
     pub async fn health(&self) -> Result<bool> {
         let url = format!("{}/global/health", self.base_url);
+        debug!(url = %url, "Sending health check");
         let response = self
             .client
             .get(&url)
@@ -74,8 +76,11 @@ impl OpenCodeClient {
                 .json()
                 .await
                 .context("Failed to parse health response")?;
-            Ok(health.status == "ok")
+            let result = health.status == "ok";
+            debug!(url = %url, healthy = result, "Health check result");
+            Ok(result)
         } else {
+            debug!(url = %url, healthy = false, "Health check result");
             Ok(false)
         }
     }
@@ -85,6 +90,7 @@ impl OpenCodeClient {
     // Used by future: session management feature
     pub async fn list_sessions(&self) -> Result<Vec<SessionInfo>> {
         let url = format!("{}/sessions", self.base_url);
+        debug!(url = %url, "Listing sessions");
         let response = self
             .client
             .get(&url)
@@ -104,6 +110,7 @@ impl OpenCodeClient {
             .await
             .context("Failed to parse sessions response")?;
 
+        debug!(count = sessions.len(), "Sessions listed");
         Ok(sessions)
     }
 
@@ -112,6 +119,7 @@ impl OpenCodeClient {
     // Used by future: session lookup feature
     pub async fn get_session(&self, id: &str) -> Result<SessionInfo> {
         let url = format!("{}/session/{}", self.base_url, id);
+        debug!(session_id = %id, url = %url, "Getting session");
         let response = self
             .client
             .get(&url)
@@ -125,6 +133,7 @@ impl OpenCodeClient {
                     .json()
                     .await
                     .context("Failed to parse session response")?;
+                debug!(session_id = %id, "Session retrieved");
                 Ok(session)
             }
             StatusCode::NOT_FOUND => {
@@ -148,6 +157,7 @@ impl OpenCodeClient {
                 .to_string(),
         };
 
+        debug!(project_path = %request_body.project_path, url = %url, "Creating session");
         let response = self
             .client
             .post(&url)
@@ -168,6 +178,7 @@ impl OpenCodeClient {
             .await
             .context("Failed to parse create session response")?;
 
+        debug!(session_id = %session.id, "Session created");
         Ok(session)
     }
 
@@ -176,6 +187,7 @@ impl OpenCodeClient {
     // Used by future: synchronous message sending feature
     pub async fn send_message(&self, session_id: &str, text: &str) -> Result<MessageResponse> {
         let url = format!("{}/session/{}/prompt", self.base_url, session_id);
+        debug!(session_id = %session_id, text_len = text.len(), url = %url, "Sending message (sync)");
 
         // Create a proper message structure
         let message = Message {
@@ -210,12 +222,14 @@ impl OpenCodeClient {
             .await
             .context("Failed to parse message response")?;
 
+        debug!(session_id = %session_id, response_role = %message_response.message.role, "Message response received");
         Ok(message_response)
     }
 
     /// Send a message asynchronously (fire and forget)
     pub async fn send_message_async(&self, session_id: &str, text: &str) -> Result<()> {
         let url = format!("{}/session/{}/prompt_async", self.base_url, session_id);
+        debug!(session_id = %session_id, text_len = text.len(), url = %url, "Sending message (async)");
 
         // Create a proper message structure
         let message = Message {
@@ -245,12 +259,15 @@ impl OpenCodeClient {
             );
         }
 
+        debug!(session_id = %session_id, status = response.status().as_u16(), "Async message sent");
         Ok(())
     }
 
     /// Generate SSE subscription URL for a session
     pub fn sse_url(&self, session_id: &str) -> String {
-        format!("{}/session/{}/stream", self.base_url, session_id)
+        let url = format!("{}/session/{}/stream", self.base_url, session_id);
+        debug!(session_id = %session_id, url = %url, "Generated SSE URL");
+        url
     }
 
     /// Reply to a permission request
@@ -264,6 +281,7 @@ impl OpenCodeClient {
             "{}/session/{}/permission/{}/reply",
             self.base_url, session_id, permission_id
         );
+        debug!(session_id = %session_id, permission_id = %permission_id, allow = allow, url = %url, "Sending permission reply");
         let request_body = PermissionReplyRequest { allow };
 
         let response = self
@@ -281,6 +299,7 @@ impl OpenCodeClient {
             );
         }
 
+        debug!("Permission reply sent");
         Ok(())
     }
 }

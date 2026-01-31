@@ -31,18 +31,20 @@ use std::sync::Arc;
 use std::time::Instant;
 use teloxide::prelude::*;
 use tokio::signal;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let config = Config::from_env()?;
+    debug!("Config loaded from environment");
 
     let run_id = format!("run_{}", uuid::Uuid::new_v4());
     let version = env!("CARGO_PKG_VERSION");
 
     let log_store = LogStore::new(&config.log_db_path).await?;
+    debug!(log_db = %config.log_db_path.display(), "Log store initialized");
 
     let config_summary = serde_json::json!({
         "max_instances": config.opencode_max_instances,
@@ -68,13 +70,16 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .with(db_layer)
         .init();
+    debug!("Tracing subscriber initialized with database layer");
 
     info!(run_id = %run_id, "oc-outpost v{}", version);
     info!("Starting Telegram bot...");
 
     info!("Initializing databases...");
     let orchestrator_store = OrchestratorStore::new(&config.orchestrator_db_path).await?;
+    debug!(db_path = %config.orchestrator_db_path.display(), "Orchestrator store initialized");
     let topic_store = TopicStore::new(&config.topic_db_path).await?;
+    debug!(db_path = %config.topic_db_path.display(), "Topic store initialized");
 
     let api_state = api::AppState {
         store: orchestrator_store.clone(),
@@ -83,8 +88,14 @@ async fn main() -> Result<()> {
 
     let store_for_manager = orchestrator_store.clone();
     let port_pool = PortPool::new(config.opencode_port_start, config.opencode_port_pool_size);
+    debug!(
+        start = config.opencode_port_start,
+        size = config.opencode_port_pool_size,
+        "Port pool created"
+    );
     let instance_manager =
         InstanceManager::new(Arc::new(config.clone()), store_for_manager, port_pool).await?;
+    debug!("Instance manager created");
 
     info!("Recovering instances from database...");
     instance_manager.recover_from_db().await?;
@@ -101,9 +112,11 @@ async fn main() -> Result<()> {
         instance_manager,
         bot_start_time,
     ));
+    debug!("Bot state initialized");
     let api_router = api::create_router(api_state);
     let api_addr = format!("127.0.0.1:{}", config.api_port);
     let api_listener = tokio::net::TcpListener::bind(&api_addr).await?;
+    debug!(addr = %api_addr, "API TCP listener bound");
     info!("API server listening on http://{}", api_addr);
 
     let api_handle = tokio::spawn(async move {
@@ -288,6 +301,7 @@ async fn main() -> Result<()> {
         .build();
 
     info!("Bot connected. Press Ctrl+C to stop.");
+    debug!("Starting Telegram dispatcher loop");
 
     tokio::select! {
         _ = dispatcher.dispatch() => {

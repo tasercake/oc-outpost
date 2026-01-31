@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use tokio::process::Command;
+use tracing::debug;
 
 /// PortPool manages allocation and cleanup of ports for OpenCode instances.
 ///
@@ -49,6 +50,12 @@ impl PortPool {
             let port = self.start + offset;
             if !allocated.contains(&port) {
                 allocated.insert(port);
+                let remaining = self.size as usize - allocated.len();
+                debug!(
+                    port = port,
+                    remaining_available = remaining,
+                    "Port allocated from pool"
+                );
                 return Ok(port);
             }
         }
@@ -66,6 +73,7 @@ impl PortPool {
     pub async fn release(&self, port: u16) {
         let mut allocated = self.allocated.lock().unwrap();
         allocated.remove(&port);
+        debug!(port = port, "Port released back to pool");
     }
 
     /// Check if a port is available (not in use by any process).
@@ -83,6 +91,7 @@ impl PortPool {
         {
             let allocated = self.allocated.lock().unwrap();
             if allocated.contains(&port) {
+                debug!(port = port, available = false, "Port is allocated in pool");
                 return false;
             }
         }
@@ -97,11 +106,22 @@ impl PortPool {
             Ok(output) => {
                 // If lsof returns output, port is in use
                 // If lsof returns empty, port is free
-                output.stdout.is_empty()
+                let available = output.stdout.is_empty();
+                debug!(
+                    port = port,
+                    available = available,
+                    "Port availability check"
+                );
+                available
             }
             Err(_) => {
                 // If lsof command fails, assume port is available
                 // (lsof might not be installed or permission denied)
+                debug!(
+                    port = port,
+                    available = true,
+                    reason = "lsof check failed, assuming available"
+                );
                 true
             }
         }

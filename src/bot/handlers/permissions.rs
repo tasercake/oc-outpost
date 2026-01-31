@@ -4,6 +4,7 @@ use crate::types::error::{OutpostError, Result};
 use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
+use tracing::debug;
 
 /// Format permission request message
 fn format_permission_message(description: &str) -> String {
@@ -47,6 +48,7 @@ pub async fn handle_permission_request(
     permission_id: &str,
     description: &str,
 ) -> Result<()> {
+    debug!(topic_id = thread_id, permission_id = %permission_id, "Sending permission request to Telegram");
     let message = format_permission_message(description);
     let keyboard = create_inline_keyboard(session_id, permission_id);
 
@@ -67,11 +69,13 @@ pub async fn handle_permission_callback(
     q: CallbackQuery,
     state: Arc<BotState>,
 ) -> Result<()> {
+    debug!(callback_data = ?q.data, "Handling permission callback");
     let data = q
         .data
         .ok_or_else(|| OutpostError::telegram_error("No callback data"))?;
 
     let (session_id, permission_id, action) = parse_callback_data(&data)?;
+    debug!(session_id = %session_id, permission_id = %permission_id, action = %action, "Parsed permission callback data");
 
     let allow = action == "allow";
 
@@ -82,6 +86,7 @@ pub async fn handle_permission_callback(
         .await
         .map_err(|e| OutpostError::telegram_error(format!("Failed to look up session: {}", e)))?
         .ok_or_else(|| OutpostError::telegram_error("Session not found"))?;
+    debug!(session_id = %session_id, instance_id = ?mapping.instance_id, "Session mapping found for permission");
 
     let instance_id = mapping
         .instance_id
@@ -104,6 +109,7 @@ pub async fn handle_permission_callback(
         .reply_permission(&session_id, &permission_id, allow)
         .await
         .map_err(|e| OutpostError::opencode_api_error(e.to_string()))?;
+    debug!(session_id = %session_id, permission_id = %permission_id, allow = allow, "Permission reply sent to OpenCode");
 
     if let Some(message) = q.message {
         let result_text = if allow { "✅ Allowed" } else { "❌ Denied" };

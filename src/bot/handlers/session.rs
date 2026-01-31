@@ -15,6 +15,7 @@ use crate::types::forum::TopicMapping;
 use crate::types::instance::InstanceInfo;
 use std::sync::Arc;
 use teloxide::prelude::*;
+use tracing::debug;
 
 /// Extract topic_id from message, ensuring it's not the General topic
 fn get_topic_id(msg: &Message) -> Result<i32> {
@@ -135,6 +136,12 @@ pub async fn handle_session(
     _cmd: Command,
     state: Arc<BotState>,
 ) -> Result<()> {
+    debug!(
+        chat_id = msg.chat.id.0,
+        topic_id = ?msg.thread_id.map(|t| t.0 .0),
+        sender_id = ?msg.from.as_ref().map(|u| u.id.0),
+        "Handling /session"
+    );
     let topic_id = get_topic_id(&msg)?;
     let chat_id = msg.chat.id;
 
@@ -146,6 +153,7 @@ pub async fn handle_session(
         .map_err(|e| OutpostError::database_error(e.to_string()))?
         .ok_or_else(|| OutpostError::telegram_error("No active connection in this topic"))?;
     drop(topic_store);
+    debug!(topic_id = topic_id, session_id = ?mapping.session_id, instance_id = ?mapping.instance_id, "Mapping found for session info");
 
     // Get instance info if available
     let instance = if let Some(instance_id) = &mapping.instance_id {
@@ -159,6 +167,11 @@ pub async fn handle_session(
     } else {
         None
     };
+
+    debug!(
+        instance_found = instance.is_some(),
+        "Instance lookup result"
+    );
 
     // Format and send message
     let output = format_session_info(&mapping, instance.as_ref());

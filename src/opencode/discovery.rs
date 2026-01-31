@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use tokio::process::Command;
+use tracing::debug;
 
 use crate::types::opencode::SessionInfo;
 
@@ -26,43 +27,63 @@ pub struct Discovery;
 #[allow(dead_code)]
 impl Discovery {
     pub async fn discover_all() -> Result<Vec<DiscoveredInstance>> {
+        debug!("Starting OpenCode process discovery");
         let ps_output = Self::run_ps_command().await?;
-        Self::parse_ps_output_and_discover(&ps_output).await
+        debug!("ps command executed, parsing output");
+        let instances = Self::parse_ps_output_and_discover(&ps_output).await?;
+        debug!(count = instances.len(), "Discovery complete");
+        Ok(instances)
     }
 
     pub async fn discover_by_path(path: &Path) -> Result<Option<DiscoveredInstance>> {
+        debug!(path = %path.display(), "Discovering instance by path");
         let instances = Self::discover_all().await?;
         let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 
-        Ok(instances.into_iter().find(|instance| {
+        let result = instances.into_iter().find(|instance| {
             let instance_canonical = instance
                 .working_dir
                 .canonicalize()
                 .unwrap_or_else(|_| instance.working_dir.clone());
             instance_canonical == canonical_path
-        }))
+        });
+        debug!(path = %path.display(), found = result.is_some(), "Discovery by path result");
+        Ok(result)
     }
 
     pub async fn get_session_info(port: u16) -> Result<Option<SessionInfo>> {
+        debug!(port = port, "Fetching session info from instance");
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(5))
             .build()?;
 
         let url = format!("http://localhost:{}/sessions", port);
 
-        match client.get(&url).send().await {
+        let result = match client.get(&url).send().await {
             Ok(response) => {
                 if response.status().is_success() {
                     match response.json::<Vec<SessionInfo>>().await {
-                        Ok(sessions) => Ok(sessions.into_iter().next()),
-                        Err(_) => Ok(None),
+                        Ok(sessions) => sessions.into_iter().next(),
+                        Err(_) => None,
                     }
                 } else {
-                    Ok(None)
+                    None
                 }
             }
-            Err(_) => Ok(None),
-        }
+            Err(_) => {
+                debug!(
+                    port = port,
+                    "Failed to connect to instance for session info"
+                );
+                None
+            }
+        };
+        debug!(
+            port = port,
+            session_found = result.is_some(),
+            "Session info fetch result"
+        );
+        Ok(result)
     }
 
     async fn run_ps_command() -> Result<String> {
@@ -77,6 +98,7 @@ impl Discovery {
     }
 
     async fn parse_ps_output_and_discover(ps_output: &str) -> Result<Vec<DiscoveredInstance>> {
+        debug!("Parsing ps output for OpenCode processes");
         let mut instances = Vec::new();
 
         for line in ps_output.lines() {
@@ -92,6 +114,8 @@ impl Discovery {
                     _ => parsed.port,
                 };
 
+                debug!(pid = parsed.pid, mode = ?parsed.mode, port = ?parsed.port, "Found OpenCode process");
+
                 instances.push(DiscoveredInstance {
                     pid: parsed.pid,
                     port,
@@ -101,6 +125,7 @@ impl Discovery {
             }
         }
 
+        debug!(total = instances.len(), "Process parsing complete");
         Ok(instances)
     }
 
@@ -171,6 +196,7 @@ impl Discovery {
     }
 
     async fn get_listening_port(pid: u32) -> Result<Option<u16>> {
+        debug!(pid = pid, "Getting listening port via lsof");
         let output = Command::new("lsof")
             .args(["-p", &pid.to_string(), "-a", "-i", "-sTCP:LISTEN"])
             .output()
@@ -178,7 +204,9 @@ impl Discovery {
             .map_err(|e| anyhow!("Failed to run lsof: {}", e))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(Self::parse_lsof_port_output(&stdout))
+        let result = Self::parse_lsof_port_output(&stdout);
+        debug!(pid = pid, port = ?result, "Port lookup result");
+        Ok(result)
     }
 
     // lsof output: NAME column format is "*:PORT (LISTEN)" or "localhost:PORT (LISTEN)"
@@ -201,6 +229,7 @@ impl Discovery {
     }
 
     async fn get_working_directory(pid: u32) -> Result<Option<PathBuf>> {
+        debug!(pid = pid, "Getting working directory via lsof");
         let output = Command::new("lsof")
             .args(["-p", &pid.to_string(), "-a", "-d", "cwd"])
             .output()
@@ -208,7 +237,9 @@ impl Discovery {
             .map_err(|e| anyhow!("Failed to run lsof: {}", e))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(Self::parse_lsof_cwd_output(&stdout))
+        let result = Self::parse_lsof_cwd_output(&stdout);
+        debug!(pid = pid, dir = ?result, "Working directory lookup result");
+        Ok(result)
     }
 
     // lsof cwd output: last column is the path

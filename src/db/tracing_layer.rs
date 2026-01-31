@@ -9,6 +9,10 @@ use tracing::{Event, Subscriber};
 use tracing_subscriber::layer::{Context, Layer};
 use tracing_subscriber::registry::LookupSpan;
 
+// NOTE: This module MUST NOT use tracing macros (debug!, info!, warn!, error!).
+// This IS the tracing layer — using tracing macros here causes infinite recursion
+// since on_event() is called for every log event, including ones from this module.
+
 pub struct DatabaseLayer {
     store: LogStore,
     handle: Handle,

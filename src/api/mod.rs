@@ -12,6 +12,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
+use tracing::debug;
 
 /// Application state shared across handlers
 #[derive(Clone)]
@@ -52,7 +53,10 @@ pub struct InstancesResponse {
 
 /// Health check handler
 async fn health() -> impl IntoResponse {
-    StatusCode::OK
+    debug!(method = "GET", path = "/api/health", "API request received");
+    let status = StatusCode::OK;
+    debug!(status = status.as_u16(), "API response");
+    status
 }
 
 /// Register external instance handler
@@ -60,6 +64,13 @@ async fn register(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<RegisterRequest>,
 ) -> impl IntoResponse {
+    debug!(
+        method = "POST",
+        path = "/api/register",
+        "API request received"
+    );
+    debug!(port = payload.port, project_path = %payload.project_path, "Registering instance");
+
     let instance = InstanceInfo {
         id: format!("external-{}", payload.port),
         state: InstanceState::Running,
@@ -81,12 +92,18 @@ async fn register(
         .save_instance(&instance, Some(&payload.session_id))
         .await
     {
-        Ok(_) => (StatusCode::CREATED, Json(instance)).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Ok(_) => {
+            debug!(instance_id = %instance.id, status = StatusCode::CREATED.as_u16(), "API response");
+            (StatusCode::CREATED, Json(instance)).into_response()
+        }
+        Err(e) => {
+            debug!(error = %e, status = StatusCode::INTERNAL_SERVER_ERROR.as_u16(), "API response");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -95,25 +112,44 @@ async fn unregister(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<UnregisterRequest>,
 ) -> impl IntoResponse {
+    debug!(
+        method = "POST",
+        path = "/api/unregister",
+        "API request received"
+    );
+    debug!(project_path = %payload.project_path, "Unregistering instance");
+
     match state
         .store
         .get_instance_by_path(&payload.project_path)
         .await
     {
         Ok(Some(instance)) => match state.store.delete_instance(&instance.id).await {
-            Ok(_) => StatusCode::NO_CONTENT.into_response(),
-            Err(e) => (
+            Ok(_) => {
+                debug!(instance_id = %instance.id, status = StatusCode::NO_CONTENT.as_u16(), "API response");
+                StatusCode::NO_CONTENT.into_response()
+            }
+            Err(e) => {
+                debug!(error = %e, status = StatusCode::INTERNAL_SERVER_ERROR.as_u16(), "API response");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": e.to_string() })),
+                )
+                    .into_response()
+            }
+        },
+        Ok(None) => {
+            debug!(status = StatusCode::NOT_FOUND.as_u16(), "API response");
+            StatusCode::NOT_FOUND.into_response()
+        }
+        Err(e) => {
+            debug!(error = %e, status = StatusCode::INTERNAL_SERVER_ERROR.as_u16(), "API response");
+            (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({ "error": e.to_string() })),
             )
-                .into_response(),
-        },
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+                .into_response()
+        }
     }
 }
 
@@ -122,42 +158,73 @@ async fn status(
     State(state): State<Arc<AppState>>,
     Path(mut path): Path<String>,
 ) -> impl IntoResponse {
+    debug!(
+        method = "GET",
+        path = "/api/status/{*path}",
+        "API request received"
+    );
+
     if !path.starts_with('/') {
         path = format!("/{}", path);
     }
+    debug!(project_path = %path, "Checking instance status");
+
     match state.store.get_instance_by_path(&path).await {
-        Ok(Some(instance)) => (
-            StatusCode::OK,
-            Json(StatusResponse {
-                registered: true,
-                instance: Some(instance),
-            }),
-        )
-            .into_response(),
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(StatusResponse {
-                registered: false,
-                instance: None,
-            }),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Ok(Some(instance)) => {
+            debug!(instance_id = %instance.id, status = StatusCode::OK.as_u16(), "API response");
+            (
+                StatusCode::OK,
+                Json(StatusResponse {
+                    registered: true,
+                    instance: Some(instance),
+                }),
+            )
+                .into_response()
+        }
+        Ok(None) => {
+            debug!(status = StatusCode::NOT_FOUND.as_u16(), "API response");
+            (
+                StatusCode::NOT_FOUND,
+                Json(StatusResponse {
+                    registered: false,
+                    instance: None,
+                }),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            debug!(error = %e, status = StatusCode::INTERNAL_SERVER_ERROR.as_u16(), "API response");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response()
+        }
     }
 }
 
 /// List all external instances handler
 async fn list_instances(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    debug!(
+        method = "GET",
+        path = "/api/instances",
+        "API request received"
+    );
+
     match state.store.get_all_instances().await {
         Ok(instances) => {
             let external_instances: Vec<InstanceInfo> = instances
                 .into_iter()
                 .filter(|i| i.instance_type == InstanceType::External)
                 .collect();
+
+            let count = external_instances.len();
+            debug!(
+                count = count,
+                status = StatusCode::OK.as_u16(),
+                "Listing instances"
+            );
+            debug!(status = StatusCode::OK.as_u16(), "API response");
 
             (
                 StatusCode::OK,
@@ -167,11 +234,14 @@ async fn list_instances(State(state): State<Arc<AppState>>) -> impl IntoResponse
             )
                 .into_response()
         }
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => {
+            debug!(error = %e, status = StatusCode::INTERNAL_SERVER_ERROR.as_u16(), "API response");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -182,7 +252,11 @@ async fn api_key_middleware(
     request: Request<Body>,
     next: Next,
 ) -> Response {
+    let has_api_key = state.api_key.is_some();
+    debug!(has_api_key = has_api_key, "API auth check");
+
     let Some(expected_key) = &state.api_key else {
+        debug!(authenticated = true, "API auth check - no key required");
         return next.run(request).await;
     };
 
@@ -192,13 +266,20 @@ async fn api_key_middleware(
         .and_then(|v| v.strip_prefix("Bearer "));
 
     match auth_header {
-        Some(key) if key == expected_key => next.run(request).await,
-        _ => (StatusCode::UNAUTHORIZED, "Unauthorized").into_response(),
+        Some(key) if key == expected_key => {
+            debug!(authenticated = true, "API auth check");
+            next.run(request).await
+        }
+        _ => {
+            debug!(authenticated = false, "API auth check");
+            (StatusCode::UNAUTHORIZED, "Unauthorized").into_response()
+        }
     }
 }
 
 /// Create the API router
 pub fn create_router(state: AppState) -> Router {
+    debug!("Creating API router");
     let state = Arc::new(state);
 
     Router::new()

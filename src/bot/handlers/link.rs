@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use teloxide::prelude::*;
 use teloxide::types::{MessageId, ThreadId};
+use tracing::debug;
 
 fn get_topic_id(msg: &Message) -> Result<i32> {
     let thread_id = msg.thread_id.ok_or_else(|| {
@@ -53,6 +54,12 @@ fn validate_path(path: &str) -> Result<PathBuf> {
 }
 
 pub async fn handle_link(bot: Bot, msg: Message, cmd: Command, state: Arc<BotState>) -> Result<()> {
+    debug!(
+        chat_id = msg.chat.id.0,
+        topic_id = ?msg.thread_id.map(|t| t.0 .0),
+        sender_id = ?msg.from.as_ref().map(|u| u.id.0),
+        "Handling /link"
+    );
     let topic_id = get_topic_id(&msg)?;
     let chat_id = msg.chat.id;
 
@@ -61,6 +68,7 @@ pub async fn handle_link(bot: Bot, msg: Message, cmd: Command, state: Arc<BotSta
     };
 
     let absolute_path = validate_path(&path)?;
+    debug!(path = %absolute_path.display(), "Path validated for link");
     let path_str = absolute_path
         .to_str()
         .ok_or_else(|| OutpostError::telegram_error("Invalid path encoding"))?
@@ -81,6 +89,7 @@ pub async fn handle_link(bot: Bot, msg: Message, cmd: Command, state: Arc<BotSta
 
     mapping.project_path = path_str.clone();
     mapping.updated_at = now;
+    debug!(topic_id = topic_id, new_path = %path_str, "Updating mapping with new project path");
 
     let topic_store = state.topic_store.lock().await;
     topic_store
@@ -88,6 +97,7 @@ pub async fn handle_link(bot: Bot, msg: Message, cmd: Command, state: Arc<BotSta
         .await
         .map_err(|e| OutpostError::database_error(e.to_string()))?;
     drop(topic_store);
+    debug!(topic_id = topic_id, "Link mapping saved");
 
     let confirmation = format!("Linked topic to {}", path_str);
     bot.send_message(chat_id, confirmation)

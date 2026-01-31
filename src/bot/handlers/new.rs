@@ -3,6 +3,7 @@ use crate::types::error::{OutpostError, Result};
 use crate::types::forum::TopicMapping;
 use std::sync::Arc;
 use teloxide::prelude::*;
+use tracing::debug;
 
 /// Validate project name according to rules:
 /// - Length: 1-50 characters
@@ -47,16 +48,30 @@ fn is_general_topic(msg: &Message) -> bool {
 /// 6. Create topic mapping in TopicStore
 /// 7. Send confirmation message
 pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotState>) -> Result<()> {
+    debug!(
+        chat_id = msg.chat.id.0,
+        topic_id = ?msg.thread_id.map(|t| t.0 .0),
+        sender_id = ?msg.from.as_ref().map(|u| u.id.0),
+        "Handling /new"
+    );
+
     // Extract project name from command
     let name = match cmd {
         Command::New(n) => n,
         _ => return Err(OutpostError::config_error("Invalid command type")),
     };
+    debug!(name = %name, "Project name extracted from command");
 
     // Validate project name
     validate_project_name(&name)?;
+    debug!(name = %name, "Project name validated");
 
     // Check if in General topic
+    debug!(
+        is_general = is_general_topic(&msg),
+        handle_general = state.config.handle_general_topic,
+        "General topic check"
+    );
     if is_general_topic(&msg) && !state.config.handle_general_topic {
         bot.send_message(
             msg.chat.id,
@@ -68,8 +83,10 @@ pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotStat
     }
 
     let project_path = state.config.project_base_path.join(&name);
+    debug!(project_path = %project_path.display(), "Resolved project path");
 
     // Check if directory already exists
+    debug!(project_path = %project_path.display(), exists = project_path.exists(), "Project directory existence check");
     if project_path.exists() {
         bot.send_message(
             msg.chat.id,
@@ -81,6 +98,7 @@ pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotStat
     }
 
     // Create project directory if enabled
+    debug!(project_path = %project_path.display(), auto_create = state.config.auto_create_project_dirs, "Creating project directory");
     if state.config.auto_create_project_dirs {
         std::fs::create_dir_all(&project_path).map_err(|e| {
             OutpostError::io_error(format!(
@@ -104,6 +122,7 @@ pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotStat
             )));
         }
     };
+    debug!(topic_id = forum_topic.thread_id.0.0, name = %name, "Forum topic created");
 
     // Spawn OpenCode instance via InstanceManager
     let instance_lock = state
@@ -116,6 +135,7 @@ pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotStat
     let instance_id = inst.id().to_string();
     let port = inst.port();
     drop(inst);
+    debug!(instance_id = %instance_id, port = port, "Instance spawned for project");
 
     // Get timestamp
     let now = std::time::SystemTime::now()
@@ -135,12 +155,17 @@ pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotStat
         created_at: now,
         updated_at: now,
     };
+    debug!(topic_id = mapping.topic_id, session_id = ?mapping.session_id, instance_id = ?mapping.instance_id, project_path = %mapping.project_path, "TopicMapping created — NOTE: session_id is None, will be set on /connect or session discovery");
     let topic_store = state.topic_store.lock().await;
     topic_store
         .save_mapping(&mapping)
         .await
         .map_err(|e| OutpostError::database_error(e.to_string()))?;
     drop(topic_store);
+    debug!(
+        topic_id = mapping.topic_id,
+        "TopicMapping saved to database"
+    );
 
     // Send confirmation to the new topic with actual port
     let confirmation = format!(
@@ -160,6 +185,10 @@ pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotStat
         )))
         .await
         .map_err(|e| OutpostError::telegram_error(e.to_string()))?;
+    debug!(
+        topic_id = forum_topic.thread_id.0 .0,
+        "Confirmation message sent"
+    );
 
     Ok(())
 }

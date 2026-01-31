@@ -11,6 +11,7 @@ use crate::types::error::{OutpostError, Result};
 use crate::types::instance::InstanceType;
 use std::sync::Arc;
 use teloxide::prelude::*;
+use tracing::debug;
 
 /// Format uptime from seconds to human-readable format (e.g., "2h 15m")
 fn format_uptime(seconds: u64) -> String {
@@ -57,6 +58,12 @@ pub async fn handle_status(
     _cmd: Command,
     state: Arc<BotState>,
 ) -> Result<()> {
+    debug!(
+        chat_id = msg.chat.id.0,
+        topic_id = ?msg.thread_id.map(|t| t.0 .0),
+        sender_id = ?msg.from.as_ref().map(|u| u.id.0),
+        "Handling /status"
+    );
     let chat_id = msg.chat.id;
 
     // Get orchestrator store
@@ -81,8 +88,19 @@ pub async fn handle_status(
         .filter(|i| i.instance_type == InstanceType::External)
         .count();
 
+    debug!(
+        managed_count = managed_count,
+        discovered_count = discovered_count,
+        external_count = external_count,
+        "Instance counts by type"
+    );
+
     // Get port pool usage from InstanceManager
     let manager_status = state.instance_manager.get_status().await;
+    debug!(
+        available_ports = manager_status.available_ports,
+        "Manager status fetched"
+    );
     let port_total = state.config.opencode_port_pool_size as usize;
     let port_used = port_total - manager_status.available_ports;
 

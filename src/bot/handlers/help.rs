@@ -8,6 +8,7 @@ use crate::bot::{BotState, Command};
 use crate::types::error::Result;
 use std::sync::Arc;
 use teloxide::prelude::*;
+use tracing::debug;
 
 /// Format help text for General topic (all commands).
 fn format_general_help() -> String {
@@ -49,8 +50,15 @@ pub async fn handle_help(
     _cmd: Command,
     _state: Arc<BotState>,
 ) -> Result<()> {
+    debug!(
+        chat_id = msg.chat.id.0,
+        topic_id = ?msg.thread_id.map(|t| t.0 .0),
+        sender_id = ?msg.from.as_ref().map(|u| u.id.0),
+        "Handling /help"
+    );
     // Detect if we're in a forum topic
     let is_topic = msg.thread_id.is_some();
+    debug!(is_topic = is_topic, "Help context detection");
 
     let help_text = if is_topic {
         format_topic_help()
