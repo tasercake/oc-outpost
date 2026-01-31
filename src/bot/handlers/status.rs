@@ -10,7 +10,6 @@ use crate::bot::{BotState, Command};
 use crate::types::error::{OutpostError, Result};
 use crate::types::instance::InstanceType;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use teloxide::prelude::*;
 
 /// Format uptime from seconds to human-readable format (e.g., "2h 15m")
@@ -85,16 +84,13 @@ pub async fn handle_status(
         .filter(|i| i.instance_type == InstanceType::External)
         .count();
 
-    // Get port pool usage
-    let port_used = state.config.opencode_port_pool_size as usize;
+    // Get port pool usage from InstanceManager
+    let manager_status = state.instance_manager.get_status().await;
     let port_total = state.config.opencode_port_pool_size as usize;
+    let port_used = port_total - manager_status.available_ports;
 
     // Calculate uptime (from bot start time)
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| OutpostError::io_error(e.to_string()))?
-        .as_secs();
-    let uptime_seconds = now;
+    let uptime_seconds = state.bot_start_time.elapsed().as_secs();
 
     // Format and send message
     let output = format_status_output(

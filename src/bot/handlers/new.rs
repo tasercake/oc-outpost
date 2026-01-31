@@ -1,10 +1,8 @@
 use crate::bot::{BotState, Command};
 use crate::types::error::{OutpostError, Result};
 use crate::types::forum::TopicMapping;
-use crate::types::instance::{InstanceInfo, InstanceState, InstanceType};
 use std::sync::Arc;
 use teloxide::prelude::*;
-use uuid::Uuid;
 
 /// Validate project name according to rules:
 /// - Length: 1-50 characters
@@ -107,8 +105,17 @@ pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotStat
         }
     };
 
-    // Generate instance ID
-    let instance_id = Uuid::new_v4().to_string();
+    // Spawn OpenCode instance via InstanceManager
+    let instance_lock = state
+        .instance_manager
+        .get_or_create(&project_path)
+        .await
+        .map_err(|e| OutpostError::io_error(format!("Failed to spawn instance: {}", e)))?;
+
+    let inst = instance_lock.lock().await;
+    let instance_id = inst.id().to_string();
+    let port = inst.port();
+    drop(inst);
 
     // Get timestamp
     let now = std::time::SystemTime::now()
@@ -116,25 +123,7 @@ pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotStat
         .map_err(|e| OutpostError::io_error(e.to_string()))?
         .as_secs() as i64;
 
-    // Create and save InstanceInfo
-    let instance = InstanceInfo {
-        id: instance_id.clone(),
-        project_path: project_path.to_string_lossy().to_string(),
-        port: state.config.opencode_port_start,
-        state: InstanceState::Starting,
-        instance_type: InstanceType::Managed,
-        pid: None,
-        started_at: Some(now),
-        stopped_at: None,
-    };
-    let store = state.orchestrator_store.lock().await;
-    store
-        .save_instance(&instance, None)
-        .await
-        .map_err(|e| OutpostError::database_error(e.to_string()))?;
-    drop(store);
-
-    // Create and save TopicMapping
+    // Create and save TopicMapping with real instance_id
     let mapping = TopicMapping {
         topic_id: forum_topic.thread_id.0 .0,
         chat_id: msg.chat.id.0,
@@ -153,15 +142,17 @@ pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotStat
         .map_err(|e| OutpostError::database_error(e.to_string()))?;
     drop(topic_store);
 
-    // Send confirmation to the new topic
+    // Send confirmation to the new topic with actual port
     let confirmation = format!(
         "🚀 Project '{}' created!\n\n\
          📁 Path: {}\n\
-         🆔 Instance: {}\n\n\
+         🆔 Instance: {}\n\
+         🔌 Port: {}\n\n\
          Send a message here to start your OpenCode session.",
         name,
         project_path.display(),
-        instance_id
+        instance_id,
+        port
     );
     bot.send_message(msg.chat.id, confirmation)
         .message_thread_id(teloxide::types::ThreadId(teloxide::types::MessageId(

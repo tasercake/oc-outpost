@@ -4,6 +4,7 @@ use crate::types::instance::InstanceType;
 use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::{MessageId, ThreadId};
+use tracing::warn;
 
 /// Extract topic_id from message, ensuring it's not the General topic
 #[allow(dead_code)]
@@ -47,14 +48,13 @@ pub async fn handle_disconnect(
             .await
             .map_err(|e| OutpostError::database_error(e.to_string()))?
         {
+            drop(store);
             if instance_info.instance_type == InstanceType::Managed {
-                store
-                    .update_state(instance_id, crate::types::instance::InstanceState::Stopped)
-                    .await
-                    .map_err(|e| OutpostError::database_error(e.to_string()))?;
+                if let Err(e) = state.instance_manager.stop_instance(instance_id).await {
+                    warn!("Failed to stop instance {}: {:?}", instance_id, e);
+                }
             }
         }
-        drop(store);
     }
 
     let session_id = mapping.session_id.as_deref().unwrap_or("unknown");
