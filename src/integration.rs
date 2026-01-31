@@ -206,10 +206,18 @@ impl Integration {
 
         tokio::spawn(async move {
             let mut first_response = !mapping.topic_name_updated;
+            let session_id = mapping.session_id.clone().unwrap_or_default();
 
             while let Some(event) = rx.recv().await {
-                if let Err(e) =
-                    Self::handle_stream_event(&bot, chat_id, topic_id, &event, &rate_limiters).await
+                if let Err(e) = Self::handle_stream_event(
+                    &bot,
+                    chat_id,
+                    topic_id,
+                    &event,
+                    &rate_limiters,
+                    &session_id,
+                )
+                .await
                 {
                     warn!("Error handling stream event: {:?}", e);
                 }
@@ -252,6 +260,7 @@ impl Integration {
         topic_id: i32,
         event: &StreamEvent,
         rate_limiters: &RwLock<HashMap<i32, RateLimitState>>,
+        session_id: &str,
     ) -> Result<()> {
         match event {
             StreamEvent::TextChunk { text } => {
@@ -322,7 +331,6 @@ impl Integration {
                     serde_json::to_string_pretty(details).unwrap_or_else(|_| details.to_string())
                 );
 
-                let session_id = ""; // We'd need to track this better
                 if let Err(e) = handle_permission_request(
                     bot.clone(),
                     chat_id,
