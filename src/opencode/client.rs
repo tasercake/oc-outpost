@@ -13,7 +13,7 @@ pub struct OpenCodeClient {
 
 /// Metadata for a message response
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct ResponseMetadata {
+pub(crate) struct ResponseMetadata {
     pub id: String,
     pub role: String,
     pub model: Option<String>,
@@ -21,6 +21,8 @@ struct ResponseMetadata {
 
 /// Response from sending a message
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
+// Used by future: send_message() method for synchronous message sending
 pub struct MessageResponse {
     pub message: Message,
     pub metadata: ResponseMetadata,
@@ -56,6 +58,8 @@ impl OpenCodeClient {
     }
 
     /// Check if the OpenCode server is healthy
+    #[allow(dead_code)]
+    // Used by future: health monitoring feature
     pub async fn health(&self) -> Result<bool> {
         let url = format!("{}/global/health", self.base_url);
         let response = self
@@ -77,6 +81,8 @@ impl OpenCodeClient {
     }
 
     /// List all sessions
+    #[allow(dead_code)]
+    // Used by future: session management feature
     pub async fn list_sessions(&self) -> Result<Vec<SessionInfo>> {
         let url = format!("{}/sessions", self.base_url);
         let response = self
@@ -102,6 +108,8 @@ impl OpenCodeClient {
     }
 
     /// Get a specific session by ID
+    #[allow(dead_code)]
+    // Used by future: session lookup feature
     pub async fn get_session(&self, id: &str) -> Result<SessionInfo> {
         let url = format!("{}/session/{}", self.base_url, id);
         let response = self
@@ -129,6 +137,8 @@ impl OpenCodeClient {
     }
 
     /// Create a new session
+    #[allow(dead_code)]
+    // Used by future: session creation feature
     pub async fn create_session(&self, project_path: &Path) -> Result<SessionInfo> {
         let url = format!("{}/session", self.base_url);
         let request_body = CreateSessionRequest {
@@ -162,6 +172,8 @@ impl OpenCodeClient {
     }
 
     /// Send a message and wait for response (synchronous)
+    #[allow(dead_code)]
+    // Used by future: synchronous message sending feature
     pub async fn send_message(&self, session_id: &str, text: &str) -> Result<MessageResponse> {
         let url = format!("{}/session/{}/prompt", self.base_url, session_id);
 

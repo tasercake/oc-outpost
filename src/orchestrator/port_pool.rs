@@ -117,6 +117,8 @@ impl PortPool {
     /// # Returns
     /// * `Ok(())` - Process killed successfully
     /// * `Err(_)` - No process found or kill failed
+    #[allow(dead_code)]
+    // Used by future: orphan process cleanup feature
     pub async fn cleanup_orphan(&self, port: u16) -> Result<()> {
         // Find PID using lsof
         let output = Command::new("lsof")

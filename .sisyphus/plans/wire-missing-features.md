@@ -816,7 +816,7 @@ Wave 4 (Cleanup — After Wave 3):
 
 ---
 
-- [ ] 11. Fix remaining clippy warnings
+- [x] 11. Fix remaining clippy warnings
 
   **What to do**:
   - After Task 10 (dead_code annotation cleanup), run `cargo clippy` and fix ALL remaining warnings

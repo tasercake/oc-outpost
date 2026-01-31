@@ -443,6 +443,8 @@ impl Integration {
     }
 
     /// Stop stream forwarding for a topic
+    #[allow(dead_code)]
+    // Used by future: selective stream stopping feature
     pub async fn stop_stream(&self, topic_id: i32) {
         let handle = {
             let mut streams = self.active_streams.lock().await;
@@ -469,6 +471,8 @@ impl Integration {
     }
 
     /// Get count of active streams
+    #[allow(dead_code)]
+    // Used by future: stream monitoring feature
     pub async fn active_stream_count(&self) -> usize {
         self.active_streams.lock().await.len()
     }

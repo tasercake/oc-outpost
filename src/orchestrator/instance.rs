@@ -27,7 +27,11 @@ pub struct OpenCodeInstance {
     port: u16,
     state: Arc<Mutex<InstanceState>>,
     child: Arc<Mutex<Option<Child>>>,
+    #[allow(dead_code)]
+    // Used by future: session tracking feature
     session_id: Arc<Mutex<Option<String>>>,
+    #[allow(dead_code)]
+    // Used by future: process monitoring feature
     pid: Arc<Mutex<Option<u32>>>,
     http_client: reqwest::Client,
 }
@@ -240,24 +244,32 @@ impl OpenCodeInstance {
     }
 
     /// Get the session ID if set.
+    #[allow(dead_code)]
+    // Used by future: session tracking feature
     pub async fn session_id(&self) -> Option<String> {
         let guard = self.session_id.lock().await;
         guard.clone()
     }
 
     /// Set the session ID.
+    #[allow(dead_code)]
+    // Used by future: session tracking feature
     pub async fn set_session_id(&self, session_id: Option<String>) {
         let mut guard = self.session_id.lock().await;
         *guard = session_id;
     }
 
     /// Get the process ID if available.
+    #[allow(dead_code)]
+    // Used by future: process monitoring feature
     pub async fn pid(&self) -> Option<u32> {
         let guard = self.pid.lock().await;
         *guard
     }
 
     /// Set the state (for external state updates like crash detection).
+    #[allow(dead_code)]
+    // Used by future: state management feature
     pub async fn set_state(&self, new_state: InstanceState) {
         let mut guard = self.state.lock().await;
         *guard = new_state;

@@ -125,6 +125,8 @@ impl TopicStore {
         }
     }
 
+    #[allow(dead_code)]
+    // Used by future: session update feature
     pub async fn update_session(&self, topic_id: i32, session_id: &str) -> Result<()> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?

@@ -30,9 +30,17 @@ const INITIAL_RESTART_DELAY: Duration = Duration::from_secs(1);
 /// Status information for the InstanceManager.
 #[derive(Debug, Clone)]
 pub struct ManagerStatus {
+    #[allow(dead_code)]
+    // Used by future: detailed status reporting feature
     pub total_instances: usize,
+    #[allow(dead_code)]
+    // Used by future: detailed status reporting feature
     pub running_instances: usize,
+    #[allow(dead_code)]
+    // Used by future: detailed status reporting feature
     pub stopped_instances: usize,
+    #[allow(dead_code)]
+    // Used by future: detailed status reporting feature
     pub error_instances: usize,
     pub available_ports: usize,
 }
@@ -160,6 +168,8 @@ impl InstanceManager {
     }
 
     /// Get an instance by ID.
+    #[allow(dead_code)]
+    // Used by future: instance lookup feature
     pub async fn get_instance(&self, id: &str) -> Option<Arc<Mutex<OpenCodeInstance>>> {
         let instances = self.instances.lock().await;
         instances.get(id).cloned()

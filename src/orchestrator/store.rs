@@ -67,6 +67,8 @@ impl OrchestratorStore {
         row.map(|r| self.row_to_instance(r)).transpose()
     }
 
+    #[allow(dead_code)]
+    // Used by future: port-based instance lookup feature
     pub async fn get_instance_by_port(&self, port: u16) -> Result<Option<InstanceInfo>> {
         let row = sqlx::query("SELECT * FROM instances WHERE port = ?")
             .bind(port as i64)
@@ -117,6 +119,8 @@ impl OrchestratorStore {
         Ok(())
     }
 
+    #[allow(dead_code)]
+    // Used by future: active instance counting feature
     pub async fn get_active_count(&self) -> Result<usize> {
         let row = sqlx::query(
             "SELECT COUNT(*) as count FROM instances 

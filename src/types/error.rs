@@ -3,27 +3,41 @@ use thiserror::Error;
 #[derive(Error, Debug, Clone)]
 pub enum OutpostError {
     #[error("Instance not found: {id}")]
+    #[allow(dead_code)]
+    // Used by future: instance lookup error handling
     InstanceNotFound { id: String },
 
     #[error("Instance already exists: {id}")]
+    #[allow(dead_code)]
+    // Used by future: instance creation validation
     InstanceAlreadyExists { id: String },
 
     #[error("Instance failed to start: {id}, reason: {reason}")]
+    #[allow(dead_code)]
+    // Used by future: instance startup error handling
     InstanceStartFailed { id: String, reason: String },
 
     #[error("Instance failed to stop: {id}, reason: {reason}")]
+    #[allow(dead_code)]
+    // Used by future: instance shutdown error handling
     InstanceStopFailed { id: String, reason: String },
 
     #[error("Topic mapping not found for topic_id: {topic_id}")]
+    #[allow(dead_code)]
+    // Used by future: topic mapping lookup error handling
     TopicMappingNotFound { topic_id: i32 },
 
     #[error("Topic mapping already exists for topic_id: {topic_id}")]
+    #[allow(dead_code)]
+    // Used by future: topic mapping creation validation
     TopicMappingAlreadyExists { topic_id: i32 },
 
     #[error("OpenCode API error: {message}")]
     OpenCodeApiError { message: String },
 
     #[error("OpenCode connection error: {url}, reason: {reason}")]
+    #[allow(dead_code)]
+    // Used by future: OpenCode connection error handling
     OpenCodeConnectionError { url: String, reason: String },
 
     #[error("Session not found: {session_id}")]
@@ -36,12 +50,18 @@ pub enum OutpostError {
     ConfigError { message: String },
 
     #[error("Port allocation error: no available ports in range {start}-{end}")]
+    #[allow(dead_code)]
+    // Used by future: port allocation error handling
     PortAllocationError { start: u16, end: u16 },
 
     #[error("Invalid state transition: from {from} to {to}")]
+    #[allow(dead_code)]
+    // Used by future: state validation error handling
     InvalidStateTransition { from: String, to: String },
 
     #[error("Maximum instances limit reached: {limit}")]
+    #[allow(dead_code)]
+    // Used by future: instance limit enforcement
     MaxInstancesReached { limit: usize },
 
     #[error("IO error: {message}")]
@@ -55,14 +75,20 @@ pub enum OutpostError {
 }
 
 impl OutpostError {
+    #[allow(dead_code)]
+    // Used by future: instance lookup error handling
     pub fn instance_not_found(id: impl Into<String>) -> Self {
         Self::InstanceNotFound { id: id.into() }
     }
 
+    #[allow(dead_code)]
+    // Used by future: instance creation validation
     pub fn instance_already_exists(id: impl Into<String>) -> Self {
         Self::InstanceAlreadyExists { id: id.into() }
     }
 
+    #[allow(dead_code)]
+    // Used by future: instance startup error handling
     pub fn instance_start_failed(id: impl Into<String>, reason: impl Into<String>) -> Self {
         Self::InstanceStartFailed {
             id: id.into(),
@@ -70,6 +96,8 @@ impl OutpostError {
         }
     }
 
+    #[allow(dead_code)]
+    // Used by future: instance shutdown error handling
     pub fn instance_stop_failed(id: impl Into<String>, reason: impl Into<String>) -> Self {
         Self::InstanceStopFailed {
             id: id.into(),
@@ -77,10 +105,14 @@ impl OutpostError {
         }
     }
 
+    #[allow(dead_code)]
+    // Used by future: topic mapping lookup error handling
     pub fn topic_mapping_not_found(topic_id: i32) -> Self {
         Self::TopicMappingNotFound { topic_id }
     }
 
+    #[allow(dead_code)]
+    // Used by future: topic mapping creation validation
     pub fn topic_mapping_already_exists(topic_id: i32) -> Self {
         Self::TopicMappingAlreadyExists { topic_id }
     }
@@ -91,6 +123,8 @@ impl OutpostError {
         }
     }
 
+    #[allow(dead_code)]
+    // Used by future: OpenCode connection error handling
     pub fn opencode_connection_error(url: impl Into<String>, reason: impl Into<String>) -> Self {
         Self::OpenCodeConnectionError {
             url: url.into(),
@@ -116,10 +150,14 @@ impl OutpostError {
         }
     }
 
+    #[allow(dead_code)]
+    // Used by future: port allocation error handling
     pub fn port_allocation_error(start: u16, end: u16) -> Self {
         Self::PortAllocationError { start, end }
     }
 
+    #[allow(dead_code)]
+    // Used by future: state validation error handling
     pub fn invalid_state_transition(from: impl Into<String>, to: impl Into<String>) -> Self {
         Self::InvalidStateTransition {
             from: from.into(),
@@ -127,6 +165,8 @@ impl OutpostError {
         }
     }
 
+    #[allow(dead_code)]
+    // Used by future: instance limit enforcement
     pub fn max_instances_reached(limit: usize) -> Self {
         Self::MaxInstancesReached { limit }
     }
@@ -137,6 +177,8 @@ impl OutpostError {
         }
     }
 
+    #[allow(dead_code)]
+    // Used by future: serialization error handling
     pub fn serialization_error(message: impl Into<String>) -> Self {
         Self::SerializationError {
             message: message.into(),

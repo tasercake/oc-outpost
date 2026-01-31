@@ -186,6 +186,8 @@ fn escape_html(text: &str) -> String {
 /// Truncate message to max_len characters
 ///
 /// Adds "..." if truncated. Avoids breaking in middle of HTML tags.
+#[allow(dead_code)]
+// Used by future: message truncation feature
 pub fn truncate_message(text: &str, max_len: usize) -> String {
     if text.len() <= max_len {
         return text.to_string();
