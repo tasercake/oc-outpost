@@ -71,10 +71,16 @@ just audit      # Check for security vulnerabilities
 ```
 src/
 ├── main.rs          # Application entry point
-├── bot/             # Telegram bot logic
-├── orchestrator/    # Instance orchestration
-├── storage/         # Database layer
-└── api/             # External API server
+├── config.rs        # Configuration from env vars
+├── bot/             # Telegram bot logic (handlers, state, commands)
+├── orchestrator/    # Instance orchestration (manager, port_pool, instance, store)
+├── opencode/        # OpenCode client, discovery, stream handler
+├── integration.rs   # Wires bot ↔ OpenCode
+├── forum/           # Topic store
+├── db/              # Database initialization
+├── api/             # External API server (axum)
+├── telegram/        # Telegram-specific utilities (markdown)
+└── types/           # Shared type definitions
 ```
 
 ## Configuration
