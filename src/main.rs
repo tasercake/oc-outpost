@@ -56,8 +56,13 @@ async fn main() -> Result<()> {
         .create_run(&run_id, version, Some(&config_summary.to_string()))
         .await?;
 
+    let default_filter = if cfg!(debug_assertions) {
+        "oc_outpost=debug"
+    } else {
+        "oc_outpost=info"
+    };
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("oc_outpost=info"));
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter));
 
     let db_layer = DatabaseLayer::new(
         log_store.clone(),
