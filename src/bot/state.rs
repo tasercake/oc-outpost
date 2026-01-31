@@ -1,7 +1,9 @@
 use crate::config::Config;
 use crate::forum::TopicStore;
+use crate::orchestrator::manager::InstanceManager;
 use crate::orchestrator::store::OrchestratorStore;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::Mutex;
 
 #[allow(dead_code)]
@@ -9,6 +11,8 @@ pub struct BotState {
     pub orchestrator_store: Arc<Mutex<OrchestratorStore>>,
     pub topic_store: Arc<Mutex<TopicStore>>,
     pub config: Arc<Config>,
+    pub instance_manager: Arc<InstanceManager>,
+    pub bot_start_time: Instant,
 }
 
 impl BotState {
@@ -17,11 +21,15 @@ impl BotState {
         orchestrator_store: OrchestratorStore,
         topic_store: TopicStore,
         config: Config,
+        instance_manager: InstanceManager,
+        bot_start_time: Instant,
     ) -> Self {
         Self {
             orchestrator_store: Arc::new(Mutex::new(orchestrator_store)),
             topic_store: Arc::new(Mutex::new(topic_store)),
             config: Arc::new(config),
+            instance_manager: Arc::new(instance_manager),
+            bot_start_time,
         }
     }
 }
@@ -29,6 +37,8 @@ impl BotState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::orchestrator::manager::InstanceManager;
+    use crate::orchestrator::port_pool::PortPool;
     use std::path::PathBuf;
     use std::time::Duration;
     use tempfile::TempDir;
@@ -66,7 +76,21 @@ mod tests {
             .unwrap();
         let topic_store = TopicStore::new(&config.topic_db_path).await.unwrap();
 
-        let state = BotState::new(orchestrator_store, topic_store, config.clone());
+        let store_for_manager = orchestrator_store.clone();
+        let port_pool = PortPool::new(4100, 10);
+        let instance_manager =
+            InstanceManager::new(Arc::new(config.clone()), store_for_manager, port_pool)
+                .await
+                .unwrap();
+        let bot_start_time = Instant::now();
+
+        let state = BotState::new(
+            orchestrator_store,
+            topic_store,
+            config.clone(),
+            instance_manager,
+            bot_start_time,
+        );
 
         assert_eq!(state.config.telegram_chat_id, -1001234567890);
         assert_eq!(state.config.opencode_max_instances, 10);
@@ -81,7 +105,21 @@ mod tests {
             .unwrap();
         let topic_store = TopicStore::new(&config.topic_db_path).await.unwrap();
 
-        let state = BotState::new(orchestrator_store, topic_store, config);
+        let store_for_manager = orchestrator_store.clone();
+        let port_pool = PortPool::new(4100, 10);
+        let instance_manager =
+            InstanceManager::new(Arc::new(config.clone()), store_for_manager, port_pool)
+                .await
+                .unwrap();
+        let bot_start_time = Instant::now();
+
+        let state = BotState::new(
+            orchestrator_store,
+            topic_store,
+            config,
+            instance_manager,
+            bot_start_time,
+        );
 
         let _orchestrator = state.orchestrator_store.lock().await;
         let _topics = state.topic_store.lock().await;
@@ -96,7 +134,21 @@ mod tests {
             .unwrap();
         let topic_store = TopicStore::new(&config.topic_db_path).await.unwrap();
 
-        let state = BotState::new(orchestrator_store, topic_store, config);
+        let store_for_manager = orchestrator_store.clone();
+        let port_pool = PortPool::new(4100, 10);
+        let instance_manager =
+            InstanceManager::new(Arc::new(config.clone()), store_for_manager, port_pool)
+                .await
+                .unwrap();
+        let bot_start_time = Instant::now();
+
+        let state = BotState::new(
+            orchestrator_store,
+            topic_store,
+            config,
+            instance_manager,
+            bot_start_time,
+        );
 
         let config_clone = Arc::clone(&state.config);
         assert_eq!(config_clone.telegram_chat_id, state.config.telegram_chat_id);

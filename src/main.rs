@@ -22,8 +22,11 @@ use forum::TopicStore;
 use integration::Integration;
 use opencode::stream_handler::StreamHandler;
 use opencode::OpenCodeClient;
+use orchestrator::manager::InstanceManager;
+use orchestrator::port_pool::PortPool;
 use orchestrator::store::OrchestratorStore;
 use std::sync::Arc;
+use std::time::Instant;
 use teloxide::prelude::*;
 use tokio::signal;
 use tracing::{error, info};
@@ -51,10 +54,18 @@ async fn main() -> Result<()> {
         api_key: config.api_key.clone(),
     };
 
+    let store_for_manager = orchestrator_store.clone();
+    let port_pool = PortPool::new(config.opencode_port_start, config.opencode_port_pool_size);
+    let instance_manager =
+        InstanceManager::new(Arc::new(config.clone()), store_for_manager, port_pool).await?;
+    let bot_start_time = Instant::now();
+
     let bot_state = Arc::new(BotState::new(
         orchestrator_store,
         topic_store,
         config.clone(),
+        instance_manager,
+        bot_start_time,
     ));
     let api_router = api::create_router(api_state);
     let api_addr = format!("127.0.0.1:{}", config.api_port);

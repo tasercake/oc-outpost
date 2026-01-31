@@ -105,7 +105,24 @@ mod tests {
             .unwrap();
         let topic_store = TopicStore::new(&config.topic_db_path).await.unwrap();
 
-        let state = BotState::new(orchestrator_store, topic_store, config);
+        let store_for_manager = orchestrator_store.clone();
+        let port_pool = crate::orchestrator::port_pool::PortPool::new(4100, 10);
+        let instance_manager = crate::orchestrator::manager::InstanceManager::new(
+            std::sync::Arc::new(config.clone()),
+            store_for_manager,
+            port_pool,
+        )
+        .await
+        .unwrap();
+        let bot_start_time = std::time::Instant::now();
+
+        let state = BotState::new(
+            orchestrator_store,
+            topic_store,
+            config,
+            instance_manager,
+            bot_start_time,
+        );
         (state, temp_dir)
     }
 

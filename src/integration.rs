@@ -477,6 +477,8 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use crate::forum::TopicStore;
+    use crate::orchestrator::manager::InstanceManager;
+    use crate::orchestrator::port_pool::PortPool;
     use crate::orchestrator::store::OrchestratorStore;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -507,7 +509,22 @@ mod tests {
             .await
             .unwrap();
         let topic_store = TopicStore::new(&config.topic_db_path).await.unwrap();
-        let state = Arc::new(BotState::new(orchestrator_store, topic_store, config));
+
+        let store_for_manager = orchestrator_store.clone();
+        let port_pool = PortPool::new(4100, 10);
+        let instance_manager =
+            InstanceManager::new(Arc::new(config.clone()), store_for_manager, port_pool)
+                .await
+                .unwrap();
+        let bot_start_time = Instant::now();
+
+        let state = Arc::new(BotState::new(
+            orchestrator_store,
+            topic_store,
+            config,
+            instance_manager,
+            bot_start_time,
+        ));
 
         let client = OpenCodeClient::new("http://localhost:4100");
         let stream_handler = Arc::new(StreamHandler::new(client));
