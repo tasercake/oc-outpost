@@ -115,6 +115,35 @@ impl TopicStore {
         Ok(mappings)
     }
 
+    pub async fn get_all_mappings(&self) -> Result<Vec<TopicMapping>> {
+        debug!("Looking up all mappings");
+        let rows = sqlx::query(
+            "SELECT topic_id, chat_id, project_path, session_id, instance_id,
+                    streaming_enabled, topic_name_updated, created_at, updated_at
+             FROM topic_mappings",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mappings: Vec<TopicMapping> = rows
+            .into_iter()
+            .map(|row| TopicMapping {
+                topic_id: row.get(0),
+                chat_id: row.get(1),
+                project_path: row.get(2),
+                session_id: row.get(3),
+                instance_id: row.get(4),
+                streaming_enabled: row.get::<i32, _>(5) != 0,
+                topic_name_updated: row.get::<i32, _>(6) != 0,
+                created_at: row.get(7),
+                updated_at: row.get(8),
+            })
+            .collect();
+
+        debug!(count = mappings.len(), "Mappings found");
+        Ok(mappings)
+    }
+
     pub async fn get_mapping_by_session(&self, session_id: &str) -> Result<Option<TopicMapping>> {
         debug!(session_id = %session_id, "Looking up mapping by session");
         let row = sqlx::query(
@@ -226,6 +255,8 @@ impl TopicStore {
         Ok(())
     }
 
+    #[allow(dead_code)]
+    // Used by future: manual cleanup and admin reporting
     pub async fn get_stale_mappings(&self, older_than: Duration) -> Result<Vec<TopicMapping>> {
         debug!("Looking up stale mappings");
         let now = std::time::SystemTime::now()

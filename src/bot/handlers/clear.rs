@@ -1,11 +1,217 @@
 use crate::bot::{BotState, Command};
 use crate::types::error::{OutpostError, Result};
-use crate::types::instance::InstanceType;
+use crate::types::forum::TopicMapping;
+use crate::types::instance::{InstanceState, InstanceType};
+use reqwest;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use teloxide::prelude::*;
+use teloxide::types::MessageId;
 use tracing::{debug, warn};
+
+/// Check if message is in General topic (thread_id is None or ThreadId(MessageId(1)))
+fn is_general_topic(msg: &Message) -> bool {
+    msg.thread_id.is_none() || (msg.thread_id.map(|id| id.0) == Some(MessageId(1)))
+}
+
+/// Why a mapping is considered stale and should be cleaned up
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StalenessReason {
+    /// Instance is in Stopped or Error state in the orchestrator store
+    InstanceStopped,
+    /// Instance exists in DB but health check (port liveness) failed
+    InstanceUnhealthy,
+    /// Mapping references an instance_id that doesn't exist in orchestrator store
+    OrphanedMapping,
+    /// Mapping has no instance_id and no session_id (incomplete setup)
+    IncompleteMapping,
+    /// Mapping hasn't been updated in over 7 days (fallback heuristic)
+    Inactive { days: u64 },
+}
+
+impl std::fmt::Display for StalenessReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StalenessReason::InstanceStopped => write!(f, "instance stopped"),
+            StalenessReason::InstanceUnhealthy => write!(f, "instance unreachable"),
+            StalenessReason::OrphanedMapping => write!(f, "instance not found"),
+            StalenessReason::IncompleteMapping => write!(f, "incomplete setup"),
+            StalenessReason::Inactive { days } => write!(f, "inactive for {} days", days),
+        }
+    }
+}
+
+struct CleanupCandidate {
+    mapping: TopicMapping,
+    reason: StalenessReason,
+}
+
+fn project_name_from_path(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(path)
+        .to_string()
+}
+
+fn build_cleanup_response(candidates: &[CleanupCandidate]) -> String {
+    if candidates.is_empty() {
+        "🧹 Cleanup Complete\n\nNo stale mappings found. All connections are healthy.".to_string()
+    } else {
+        let mut msg = format!(
+            "🧹 Cleanup Complete\n\nCleared {} stale mapping(s):\n",
+            candidates.len()
+        );
+        for candidate in candidates {
+            let project_name = project_name_from_path(&candidate.mapping.project_path);
+            msg.push_str(&format!("• {} — {}\n", project_name, candidate.reason));
+        }
+        msg.trim_end().to_string()
+    }
+}
+
+async fn find_cleanup_candidates(state: &BotState) -> Result<Vec<CleanupCandidate>> {
+    let topic_store = state.topic_store.lock().await;
+    let mappings = topic_store
+        .get_all_mappings()
+        .await
+        .map_err(|e| OutpostError::database_error(e.to_string()))?;
+    drop(topic_store);
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| OutpostError::io_error(e.to_string()))?
+        .as_secs() as i64;
+    let stale_threshold = 7 * 24 * 60 * 60;
+    let health_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap_or_default();
+
+    let mut candidates = Vec::new();
+
+    for mapping in mappings {
+        if let Some(instance_id) = &mapping.instance_id {
+            let store = state.orchestrator_store.lock().await;
+            let instance = store
+                .get_instance(instance_id)
+                .await
+                .map_err(|e| OutpostError::database_error(e.to_string()))?;
+            drop(store);
+
+            match instance {
+                None => {
+                    candidates.push(CleanupCandidate {
+                        mapping,
+                        reason: StalenessReason::OrphanedMapping,
+                    });
+                }
+                Some(instance_info) => match instance_info.state {
+                    InstanceState::Stopped | InstanceState::Error => {
+                        candidates.push(CleanupCandidate {
+                            mapping,
+                            reason: StalenessReason::InstanceStopped,
+                        });
+                    }
+                    InstanceState::Running | InstanceState::Starting | InstanceState::Stopping => {
+                        let url = format!("http://localhost:{}/global/health", instance_info.port);
+                        let is_healthy = match health_client.get(url).send().await {
+                            Ok(resp) => resp.status().is_success(),
+                            Err(_) => false,
+                        };
+                        if !is_healthy {
+                            candidates.push(CleanupCandidate {
+                                mapping,
+                                reason: StalenessReason::InstanceUnhealthy,
+                            });
+                        }
+                    }
+                },
+            }
+
+            continue;
+        }
+
+        if mapping.session_id.is_none() {
+            candidates.push(CleanupCandidate {
+                mapping,
+                reason: StalenessReason::IncompleteMapping,
+            });
+            continue;
+        }
+
+        let age_secs = now.saturating_sub(mapping.updated_at);
+        if age_secs > stale_threshold {
+            let days = (age_secs / (24 * 60 * 60)) as u64;
+            candidates.push(CleanupCandidate {
+                mapping,
+                reason: StalenessReason::Inactive { days },
+            });
+        }
+    }
+
+    Ok(candidates)
+}
+
+async fn cleanup_candidate(state: &BotState, candidate: CleanupCandidate) -> Result<()> {
+    if let Some(instance_id) = &candidate.mapping.instance_id {
+        let store = state.orchestrator_store.lock().await;
+        let instance = store
+            .get_instance(instance_id)
+            .await
+            .map_err(|e| OutpostError::database_error(e.to_string()))?;
+        drop(store);
+
+        if let Some(instance_info) = instance {
+            if instance_info.instance_type == InstanceType::Managed {
+                debug!(instance_id = %instance_id, "Stopping stale managed instance");
+                if let Err(e) = state.instance_manager.stop_instance(instance_id).await {
+                    warn!(
+                        instance_id = %instance_id,
+                        error = %e,
+                        "Failed to stop stale managed instance"
+                    );
+                }
+            }
+        }
+    }
+
+    let topic_store = state.topic_store.lock().await;
+    topic_store
+        .delete_mapping(candidate.mapping.topic_id)
+        .await
+        .map_err(|e| OutpostError::database_error(e.to_string()))?;
+    drop(topic_store);
+    debug!(
+        topic_id = candidate.mapping.topic_id,
+        "Stale mapping deleted"
+    );
+
+    let project_path = Path::new(&candidate.mapping.project_path);
+    let base_path = &state.config.project_base_path;
+    if project_path.starts_with(base_path) && project_path != base_path {
+        if project_path.is_dir() {
+            match std::fs::remove_dir_all(project_path) {
+                Ok(()) => {
+                    debug!(
+                        path = %candidate.mapping.project_path,
+                        "Removed stale project directory"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        path = %candidate.mapping.project_path,
+                        error = %e,
+                        "Failed to remove stale project directory"
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
 
 pub async fn handle_clear(
     bot: Bot,
@@ -21,80 +227,25 @@ pub async fn handle_clear(
     );
     let chat_id = msg.chat.id;
 
-    let topic_store = state.topic_store.lock().await;
-    let stale_mappings = topic_store
-        .get_stale_mappings(Duration::from_secs(7 * 24 * 60 * 60))
+    if !is_general_topic(&msg) {
+        bot.send_message(
+            chat_id,
+            "The /clear command can only be used in the General topic.",
+        )
         .await
-        .map_err(|e| OutpostError::database_error(e.to_string()))?;
-    drop(topic_store);
-    debug!(stale_count = stale_mappings.len(), "Stale mappings found");
-
-    let mut cleared_projects = Vec::new();
-
-    for mapping in stale_mappings {
-        if let Some(instance_id) = &mapping.instance_id {
-            let store = state.orchestrator_store.lock().await;
-            if let Some(instance_info) = store
-                .get_instance(instance_id)
-                .await
-                .map_err(|e| OutpostError::database_error(e.to_string()))?
-            {
-                if instance_info.instance_type == InstanceType::Managed {
-                    debug!(instance_id = %instance_id, "Stopping stale managed instance");
-                    let _ = store
-                        .update_state(instance_id, crate::types::instance::InstanceState::Stopped)
-                        .await;
-                }
-            }
-            drop(store);
-        }
-
-        let topic_store = state.topic_store.lock().await;
-        topic_store
-            .delete_mapping(mapping.topic_id)
-            .await
-            .map_err(|e| OutpostError::database_error(e.to_string()))?;
-        drop(topic_store);
-        debug!(topic_id = mapping.topic_id, "Stale mapping deleted");
-
-        let project_path = Path::new(&mapping.project_path);
-        let base_path = &state.config.project_base_path;
-        if project_path.starts_with(base_path) && project_path != base_path {
-            if project_path.is_dir() {
-                match std::fs::remove_dir_all(project_path) {
-                    Ok(()) => {
-                        debug!(path = %mapping.project_path, "Removed stale project directory");
-                    }
-                    Err(e) => {
-                        warn!(
-                            path = %mapping.project_path,
-                            error = %e,
-                            "Failed to remove stale project directory"
-                        );
-                    }
-                }
-            }
-        }
-
-        cleared_projects.push(mapping.project_path);
+        .map_err(|e| OutpostError::telegram_error(e.to_string()))?;
+        return Ok(());
     }
-    debug!(
-        cleared_count = cleared_projects.len(),
-        "Clear operation complete"
-    );
 
-    let response = if cleared_projects.is_empty() {
-        "Cleanup Complete\n\nNo stale mappings found.".to_string()
-    } else {
-        let mut msg = format!(
-            "Cleanup Complete\n\nCleared {} stale mappings:\n",
-            cleared_projects.len()
-        );
-        for project in cleared_projects {
-            msg.push_str(&format!("- {}\n", project));
-        }
-        msg.trim_end().to_string()
-    };
+    let candidates = find_cleanup_candidates(&state).await?;
+    debug!(stale_count = candidates.len(), "Stale mappings found");
+
+    let response = build_cleanup_response(&candidates);
+
+    for candidate in candidates {
+        cleanup_candidate(&state, candidate).await?;
+    }
+    debug!("Clear operation complete");
 
     bot.send_message(chat_id, response)
         .await
@@ -111,6 +262,7 @@ mod tests {
     use crate::orchestrator::store::OrchestratorStore;
     use crate::types::forum::TopicMapping;
     use crate::types::instance::{InstanceInfo, InstanceState};
+    use serde_json::json;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
@@ -163,30 +315,77 @@ mod tests {
         (state, temp_dir)
     }
 
+    fn message_with_thread_id(thread_id: Option<i32>) -> Message {
+        let mut value = json!({
+            "message_id": 1,
+            "date": 0,
+            "chat": { "id": 1, "type": "supergroup" }
+        });
+        if let Some(id) = thread_id {
+            value["message_thread_id"] = json!(id);
+        }
+        serde_json::from_value(value).unwrap()
+    }
+
     #[tokio::test]
     async fn test_clear_with_no_stale_mappings() {
         let (state, _temp_dir) = create_test_state().await;
 
-        let topic_store = state.topic_store.lock().await;
-        let stale = topic_store
-            .get_stale_mappings(Duration::from_secs(7 * 24 * 60 * 60))
-            .await
-            .unwrap();
-        drop(topic_store);
+        let candidates = find_cleanup_candidates(&state).await.unwrap();
+        assert!(candidates.is_empty());
 
-        assert!(stale.is_empty());
+        let response = build_cleanup_response(&candidates);
+        assert_eq!(
+            response,
+            "🧹 Cleanup Complete\n\nNo stale mappings found. All connections are healthy."
+        );
     }
 
     #[tokio::test]
-    async fn test_clear_with_stale_managed_instances() {
+    async fn test_clear_general_topic_detection() {
+        let general_message = message_with_thread_id(None);
+        assert!(is_general_topic(&general_message));
+
+        let general_thread = message_with_thread_id(Some(1));
+        assert!(is_general_topic(&general_thread));
+
+        let non_general_thread = message_with_thread_id(Some(2));
+        assert!(!is_general_topic(&non_general_thread));
+    }
+
+    #[tokio::test]
+    async fn test_staleness_reason_display() {
+        assert_eq!(
+            StalenessReason::InstanceStopped.to_string(),
+            "instance stopped"
+        );
+        assert_eq!(
+            StalenessReason::InstanceUnhealthy.to_string(),
+            "instance unreachable"
+        );
+        assert_eq!(
+            StalenessReason::OrphanedMapping.to_string(),
+            "instance not found"
+        );
+        assert_eq!(
+            StalenessReason::IncompleteMapping.to_string(),
+            "incomplete setup"
+        );
+        assert_eq!(
+            StalenessReason::Inactive { days: 9 }.to_string(),
+            "inactive for 9 days"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_clear_with_stopped_instance() {
         let (state, _temp_dir) = create_test_state().await;
 
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
 
-        let old_time = now - (8 * 24 * 60 * 60);
         let mapping = TopicMapping {
             topic_id: 100,
             chat_id: -1001234567890,
@@ -195,8 +394,8 @@ mod tests {
             instance_id: Some("inst_managed".to_string()),
             streaming_enabled: false,
             topic_name_updated: false,
-            created_at: old_time,
-            updated_at: old_time,
+            created_at: now,
+            updated_at: now,
         };
 
         let topic_store = state.topic_store.lock().await;
@@ -205,13 +404,13 @@ mod tests {
 
         let instance = InstanceInfo {
             id: "inst_managed".to_string(),
-            state: InstanceState::Running,
+            state: InstanceState::Stopped,
             instance_type: InstanceType::Managed,
             project_path: "/test/old-project".to_string(),
             port: 4100,
             pid: Some(12345),
-            started_at: Some(old_time),
-            stopped_at: None,
+            started_at: Some(now),
+            stopped_at: Some(now),
         };
 
         let store = state.orchestrator_store.lock().await;
@@ -221,34 +420,88 @@ mod tests {
             .unwrap();
         drop(store);
 
-        let topic_store = state.topic_store.lock().await;
-        let stale = topic_store
-            .get_stale_mappings(Duration::from_secs(7 * 24 * 60 * 60))
-            .await
-            .unwrap();
-        drop(topic_store);
-
-        assert_eq!(stale.len(), 1);
-        assert_eq!(stale[0].project_path, "/test/old-project");
-        assert_eq!(stale[0].instance_id, Some("inst_managed".to_string()));
+        let candidates = find_cleanup_candidates(&state).await.unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].mapping.project_path, "/test/old-project");
+        assert_eq!(candidates[0].reason, StalenessReason::InstanceStopped);
     }
 
     #[tokio::test]
-    async fn test_clear_with_stale_discovered_instances() {
+    async fn test_clear_with_orphaned_mapping() {
         let (state, _temp_dir) = create_test_state().await;
 
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
 
-        let old_time = now - (8 * 24 * 60 * 60);
         let mapping = TopicMapping {
             topic_id: 200,
             chat_id: -1001234567890,
-            project_path: "/test/discovered-project".to_string(),
-            session_id: Some("ses_discovered".to_string()),
-            instance_id: Some("inst_discovered".to_string()),
+            project_path: "/test/missing-instance".to_string(),
+            session_id: Some("ses_missing".to_string()),
+            instance_id: Some("inst_nonexistent".to_string()),
+            streaming_enabled: false,
+            topic_name_updated: false,
+            created_at: now,
+            updated_at: now,
+        };
+
+        let topic_store = state.topic_store.lock().await;
+        topic_store.save_mapping(&mapping).await.unwrap();
+        drop(topic_store);
+
+        let candidates = find_cleanup_candidates(&state).await.unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].reason, StalenessReason::OrphanedMapping);
+    }
+
+    #[tokio::test]
+    async fn test_clear_with_incomplete_mapping() {
+        let (state, _temp_dir) = create_test_state().await;
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        let mapping = TopicMapping {
+            topic_id: 300,
+            chat_id: -1001234567890,
+            project_path: "/test/incomplete".to_string(),
+            session_id: None,
+            instance_id: None,
+            streaming_enabled: false,
+            topic_name_updated: false,
+            created_at: now,
+            updated_at: now,
+        };
+
+        let topic_store = state.topic_store.lock().await;
+        topic_store.save_mapping(&mapping).await.unwrap();
+        drop(topic_store);
+
+        let candidates = find_cleanup_candidates(&state).await.unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].reason, StalenessReason::IncompleteMapping);
+    }
+
+    #[tokio::test]
+    async fn test_clear_with_inactive_mapping() {
+        let (state, _temp_dir) = create_test_state().await;
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let old_time = now - (8 * 24 * 60 * 60);
+
+        let mapping = TopicMapping {
+            topic_id: 400,
+            chat_id: -1001234567890,
+            project_path: "/test/inactive".to_string(),
+            session_id: Some("ses_inactive".to_string()),
+            instance_id: None,
             streaming_enabled: false,
             topic_name_updated: false,
             created_at: old_time,
@@ -259,112 +512,9 @@ mod tests {
         topic_store.save_mapping(&mapping).await.unwrap();
         drop(topic_store);
 
-        let instance = InstanceInfo {
-            id: "inst_discovered".to_string(),
-            state: InstanceState::Running,
-            instance_type: InstanceType::Discovered,
-            project_path: "/test/discovered-project".to_string(),
-            port: 4101,
-            pid: Some(54321),
-            started_at: Some(old_time),
-            stopped_at: None,
-        };
-
-        let store = state.orchestrator_store.lock().await;
-        store
-            .save_instance(&instance, Some("ses_discovered"))
-            .await
-            .unwrap();
-        drop(store);
-
-        let topic_store = state.topic_store.lock().await;
-        let stale = topic_store
-            .get_stale_mappings(Duration::from_secs(7 * 24 * 60 * 60))
-            .await
-            .unwrap();
-        drop(topic_store);
-
-        assert_eq!(stale.len(), 1);
-        assert_eq!(stale[0].instance_id, Some("inst_discovered".to_string()));
-    }
-
-    #[tokio::test]
-    async fn test_clear_formatting_empty() {
-        let (state, _temp_dir) = create_test_state().await;
-
-        let topic_store = state.topic_store.lock().await;
-        let stale = topic_store
-            .get_stale_mappings(Duration::from_secs(7 * 24 * 60 * 60))
-            .await
-            .unwrap();
-        drop(topic_store);
-
-        let response = if stale.is_empty() {
-            "Cleanup Complete\n\nNo stale mappings found.".to_string()
-        } else {
-            let mut msg = format!(
-                "Cleanup Complete\n\nCleared {} stale mappings:\n",
-                stale.len()
-            );
-            for mapping in stale {
-                msg.push_str(&format!("- {}\n", mapping.project_path));
-            }
-            msg.trim_end().to_string()
-        };
-
-        assert_eq!(response, "Cleanup Complete\n\nNo stale mappings found.");
-    }
-
-    #[tokio::test]
-    async fn test_clear_formatting_with_mappings() {
-        let (state, _temp_dir) = create_test_state().await;
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        let old_time = now - (8 * 24 * 60 * 60);
-
-        for i in 0..3 {
-            let mapping = TopicMapping {
-                topic_id: 300 + i,
-                chat_id: -1001234567890,
-                project_path: format!("/test/project-{}", i),
-                session_id: Some(format!("ses_{}", i)),
-                instance_id: None,
-                streaming_enabled: false,
-                topic_name_updated: false,
-                created_at: old_time,
-                updated_at: old_time,
-            };
-
-            let topic_store = state.topic_store.lock().await;
-            topic_store.save_mapping(&mapping).await.unwrap();
-            drop(topic_store);
-        }
-
-        let topic_store = state.topic_store.lock().await;
-        let stale = topic_store
-            .get_stale_mappings(Duration::from_secs(7 * 24 * 60 * 60))
-            .await
-            .unwrap();
-        drop(topic_store);
-
-        let mut response = format!(
-            "Cleanup Complete\n\nCleared {} stale mappings:\n",
-            stale.len()
-        );
-        for mapping in stale {
-            response.push_str(&format!("- {}\n", mapping.project_path));
-        }
-        let response = response.trim_end().to_string();
-
-        assert!(response.contains("Cleanup Complete"));
-        assert!(response.contains("Cleared 3 stale mappings:"));
-        assert!(response.contains("- /test/project-0"));
-        assert!(response.contains("- /test/project-1"));
-        assert!(response.contains("- /test/project-2"));
+        let candidates = find_cleanup_candidates(&state).await.unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].reason, StalenessReason::Inactive { days: 8 });
     }
 
     #[tokio::test]
@@ -376,8 +526,8 @@ mod tests {
         std::fs::write(project_dir.join("dummy.txt"), "test").unwrap();
         assert!(project_dir.is_dir());
 
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
         let old_time = now - (8 * 24 * 60 * 60);
@@ -398,21 +548,11 @@ mod tests {
         topic_store.save_mapping(&mapping).await.unwrap();
         drop(topic_store);
 
-        let topic_store = state.topic_store.lock().await;
-        let stale = topic_store
-            .get_stale_mappings(Duration::from_secs(7 * 24 * 60 * 60))
+        let candidates = find_cleanup_candidates(&state).await.unwrap();
+        assert_eq!(candidates.len(), 1);
+        cleanup_candidate(&state, candidates.into_iter().next().unwrap())
             .await
             .unwrap();
-        drop(topic_store);
-        assert_eq!(stale.len(), 1);
-
-        let base_path = &state.config.project_base_path;
-        for m in &stale {
-            let path = std::path::Path::new(&m.project_path);
-            if path.starts_with(base_path) && path != base_path && path.is_dir() {
-                std::fs::remove_dir_all(path).unwrap();
-            }
-        }
 
         assert!(!project_dir.exists());
     }
@@ -426,8 +566,8 @@ mod tests {
         std::fs::create_dir_all(&external_path).unwrap();
         assert!(external_path.is_dir());
 
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
         let old_time = now - (8 * 24 * 60 * 60);
@@ -448,61 +588,12 @@ mod tests {
         topic_store.save_mapping(&mapping).await.unwrap();
         drop(topic_store);
 
-        let topic_store = state.topic_store.lock().await;
-        let stale = topic_store
-            .get_stale_mappings(Duration::from_secs(7 * 24 * 60 * 60))
+        let candidates = find_cleanup_candidates(&state).await.unwrap();
+        assert_eq!(candidates.len(), 1);
+        cleanup_candidate(&state, candidates.into_iter().next().unwrap())
             .await
             .unwrap();
-        drop(topic_store);
-        assert_eq!(stale.len(), 1);
-
-        let base_path = &state.config.project_base_path;
-        let path = std::path::Path::new(&stale[0].project_path);
-        assert!(!path.starts_with(base_path));
 
         assert!(external_path.is_dir());
-    }
-
-    #[tokio::test]
-    async fn test_clear_error_handling_missing_instance() {
-        let (state, _temp_dir) = create_test_state().await;
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        let old_time = now - (8 * 24 * 60 * 60);
-
-        let mapping = TopicMapping {
-            topic_id: 400,
-            chat_id: -1001234567890,
-            project_path: "/test/missing-instance".to_string(),
-            session_id: Some("ses_missing".to_string()),
-            instance_id: Some("inst_nonexistent".to_string()),
-            streaming_enabled: false,
-            topic_name_updated: false,
-            created_at: old_time,
-            updated_at: old_time,
-        };
-
-        let topic_store = state.topic_store.lock().await;
-        topic_store.save_mapping(&mapping).await.unwrap();
-        drop(topic_store);
-
-        let topic_store = state.topic_store.lock().await;
-        let stale = topic_store
-            .get_stale_mappings(Duration::from_secs(7 * 24 * 60 * 60))
-            .await
-            .unwrap();
-        drop(topic_store);
-
-        assert_eq!(stale.len(), 1);
-
-        let store = state.orchestrator_store.lock().await;
-        let result = store.get_instance("inst_nonexistent").await.unwrap();
-        drop(store);
-
-        assert!(result.is_none());
     }
 }
