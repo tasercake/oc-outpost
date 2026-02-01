@@ -63,7 +63,7 @@ impl OpenCodeInstance {
         let session_id = Arc::new(Mutex::new(None::<String>));
         let pid_holder = Arc::new(Mutex::new(None::<u32>));
 
-        let mut cmd = Command::new("opencode");
+        let mut cmd = Command::new(&config.opencode_path);
         cmd.arg("serve")
             .arg("--port")
             .arg(port.to_string())
@@ -450,6 +450,7 @@ mod tests {
             project_path: project_path.to_string(),
             port: 0,
             auto_start: true,
+            opencode_path: "opencode".to_string(),
         }
     }
 
@@ -600,6 +601,7 @@ mod tests {
             project_path: "/tmp/test".to_string(),
             port: 4300,
             auto_start: true,
+            opencode_path: "/nonexistent/opencode-test-binary".to_string(),
         };
 
         let result = OpenCodeInstance::spawn(config, 4300).await;

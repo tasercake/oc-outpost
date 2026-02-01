@@ -38,7 +38,18 @@ pub struct Config {
 impl Config {
     /// Load configuration from environment variables
     pub fn from_env() -> Result<Self> {
-        dotenvy::dotenv().ok();
+        Self::from_env_inner(true)
+    }
+
+    #[cfg(test)]
+    pub fn from_env_no_dotenv() -> Result<Self> {
+        Self::from_env_inner(false)
+    }
+
+    fn from_env_inner(load_dotenv: bool) -> Result<Self> {
+        if load_dotenv {
+            dotenvy::dotenv().ok();
+        }
 
         let telegram_bot_token = std::env::var("TELEGRAM_BOT_TOKEN")
             .map_err(|_| anyhow!("TELEGRAM_BOT_TOKEN is required but not set"))?;
@@ -209,14 +220,41 @@ mod tests {
     use super::*;
     use serial_test::serial;
 
+    /// Remove ALL env vars that Config::from_env reads to prevent cross-test pollution
+    fn clean_config_env() {
+        for var in [
+            "TELEGRAM_BOT_TOKEN",
+            "TELEGRAM_CHAT_ID",
+            "TELEGRAM_ALLOWED_USERS",
+            "HANDLE_GENERAL_TOPIC",
+            "OPENCODE_PATH",
+            "OPENCODE_MAX_INSTANCES",
+            "OPENCODE_IDLE_TIMEOUT_MS",
+            "OPENCODE_PORT_START",
+            "OPENCODE_PORT_POOL_SIZE",
+            "OPENCODE_HEALTH_CHECK_INTERVAL_MS",
+            "OPENCODE_STARTUP_TIMEOUT_MS",
+            "ORCHESTRATOR_DB_PATH",
+            "TOPIC_DB_PATH",
+            "LOG_DB_PATH",
+            "PROJECT_BASE_PATH",
+            "AUTO_CREATE_PROJECT_DIRS",
+            "API_PORT",
+            "API_KEY",
+        ] {
+            std::env::remove_var(var);
+        }
+    }
+
     #[test]
     #[serial]
     fn test_missing_telegram_bot_token() {
+        clean_config_env();
         std::env::remove_var("TELEGRAM_BOT_TOKEN");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
 
-        let result = Config::from_env();
+        let result = Config::from_env_no_dotenv();
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -227,11 +265,12 @@ mod tests {
     #[test]
     #[serial]
     fn test_missing_telegram_chat_id() {
+        clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::remove_var("TELEGRAM_CHAT_ID");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
 
-        let result = Config::from_env();
+        let result = Config::from_env_no_dotenv();
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -242,11 +281,12 @@ mod tests {
     #[test]
     #[serial]
     fn test_missing_project_base_path() {
+        clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
         std::env::remove_var("PROJECT_BASE_PATH");
 
-        let result = Config::from_env();
+        let result = Config::from_env_no_dotenv();
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -257,6 +297,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_defaults_applied_correctly() {
+        clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
@@ -277,7 +318,7 @@ mod tests {
         std::env::remove_var("HANDLE_GENERAL_TOPIC");
         std::env::remove_var("API_KEY");
 
-        let config = Config::from_env().expect("Config should load with defaults");
+        let config = Config::from_env_no_dotenv().expect("Config should load with defaults");
 
         assert_eq!(config.opencode_path, PathBuf::from("opencode"));
         assert_eq!(config.opencode_max_instances, 10);
@@ -308,6 +349,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_duration_parsing() {
+        clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
@@ -315,7 +357,7 @@ mod tests {
         std::env::set_var("OPENCODE_HEALTH_CHECK_INTERVAL_MS", "15000");
         std::env::set_var("OPENCODE_STARTUP_TIMEOUT_MS", "30000");
 
-        let config = Config::from_env().expect("Config should parse durations");
+        let config = Config::from_env_no_dotenv().expect("Config should parse durations");
 
         assert_eq!(config.opencode_idle_timeout, Duration::from_millis(5000));
         assert_eq!(
@@ -331,11 +373,12 @@ mod tests {
     #[test]
     #[serial]
     fn test_path_expansion() {
+        clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
 
-        let config = Config::from_env().expect("Config should expand paths");
+        let config = Config::from_env_no_dotenv().expect("Config should expand paths");
 
         assert!(!config.project_base_path.to_string_lossy().contains("~"));
         assert!(!config.project_base_path.to_string_lossy().is_empty());
@@ -344,12 +387,13 @@ mod tests {
     #[test]
     #[serial]
     fn test_telegram_allowed_users_parsing() {
+        clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
         std::env::set_var("TELEGRAM_ALLOWED_USERS", "123,456,789");
 
-        let config = Config::from_env().expect("Config should parse allowed users");
+        let config = Config::from_env_no_dotenv().expect("Config should parse allowed users");
 
         assert_eq!(config.telegram_allowed_users, vec![123, 456, 789]);
     }
@@ -357,12 +401,14 @@ mod tests {
     #[test]
     #[serial]
     fn test_telegram_allowed_users_empty() {
+        clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
         std::env::set_var("TELEGRAM_ALLOWED_USERS", "");
 
-        let config = Config::from_env().expect("Config should handle empty allowed users");
+        let config =
+            Config::from_env_no_dotenv().expect("Config should handle empty allowed users");
 
         assert!(config.telegram_allowed_users.is_empty());
     }
@@ -370,12 +416,13 @@ mod tests {
     #[test]
     #[serial]
     fn test_masked_display() {
+        clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "secret-token-12345");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
         std::env::set_var("API_KEY", "secret-api-key");
 
-        let config = Config::from_env().expect("Config should load");
+        let config = Config::from_env_no_dotenv().expect("Config should load");
         let display = config.to_string();
 
         assert!(display.contains("***MASKED***"));
@@ -386,69 +433,78 @@ mod tests {
     #[test]
     #[serial]
     fn test_invalid_telegram_chat_id() {
+        clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "not-a-number");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
 
-        let result = Config::from_env();
+        let result = Config::from_env_no_dotenv();
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .to_string()
             .contains("TELEGRAM_CHAT_ID must be a valid integer"));
+        clean_config_env();
     }
 
     #[test]
     #[serial]
     fn test_invalid_opencode_max_instances() {
+        clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
         std::env::set_var("OPENCODE_MAX_INSTANCES", "not-a-number");
 
-        let result = Config::from_env();
+        let result = Config::from_env_no_dotenv();
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .to_string()
             .contains("OPENCODE_MAX_INSTANCES must be a valid integer"));
+        clean_config_env();
     }
 
     #[test]
     #[serial]
     fn test_invalid_api_port() {
+        clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
         std::env::set_var("API_PORT", "not-a-port");
 
-        let result = Config::from_env();
+        let result = Config::from_env_no_dotenv();
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .to_string()
             .contains("API_PORT must be a valid port number"));
+        clean_config_env();
     }
 
     #[test]
     #[serial]
     fn test_invalid_boolean_field() {
+        clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
         std::env::set_var("HANDLE_GENERAL_TOPIC", "maybe");
 
-        let result = Config::from_env();
+        let result = Config::from_env_no_dotenv();
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .to_string()
             .contains("HANDLE_GENERAL_TOPIC must be 'true' or 'false'"));
+        clean_config_env();
     }
 
     #[test]
     #[serial]
     fn test_full_config_load() {
+        clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz");
         std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
         std::env::set_var("TELEGRAM_ALLOWED_USERS", "111,222,333");
@@ -468,7 +524,7 @@ mod tests {
         std::env::set_var("API_PORT", "8080");
         std::env::set_var("API_KEY", "my-secret-key");
 
-        let config = Config::from_env().expect("Config should load all fields");
+        let config = Config::from_env_no_dotenv().expect("Config should load all fields");
 
         assert_eq!(
             config.telegram_bot_token,

@@ -467,6 +467,10 @@ impl InstanceManager {
                                         project_path: project_path.clone(),
                                         port: new_port,
                                         auto_start: true,
+                                        opencode_path: config
+                                            .opencode_path
+                                            .to_string_lossy()
+                                            .to_string(),
                                     };
 
                                     match OpenCodeInstance::spawn(instance_config, new_port).await {
@@ -680,6 +684,7 @@ impl InstanceManager {
             project_path: path_str.to_string(),
             port,
             auto_start: true,
+            opencode_path: self.config.opencode_path.to_string_lossy().to_string(),
         };
 
         // Spawn instance
@@ -824,6 +829,7 @@ impl InstanceManager {
             project_path: info.project_path.clone(),
             port: info.port,
             auto_start: true,
+            opencode_path: self.config.opencode_path.to_string_lossy().to_string(),
         };
 
         let instance = OpenCodeInstance::external(instance_config, info.port, info.pid)?;
@@ -864,7 +870,7 @@ mod tests {
             telegram_chat_id: -1001234567890,
             telegram_allowed_users: vec![],
             handle_general_topic: true,
-            opencode_path: std::path::PathBuf::from("opencode"),
+            opencode_path: std::path::PathBuf::from("/nonexistent/opencode-test-binary"),
             opencode_max_instances: 5,
             opencode_idle_timeout: Duration::from_secs(300),
             opencode_port_start: 14100,
@@ -1051,6 +1057,7 @@ mod tests {
             project_path: "/test/existing".to_string(),
             port: 14200,
             auto_start: true,
+            opencode_path: "/nonexistent/opencode-test-binary".to_string(),
         };
         let instance = OpenCodeInstance::external(instance_config, 14200, None).unwrap();
         {

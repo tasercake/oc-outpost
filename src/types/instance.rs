@@ -25,6 +25,12 @@ pub struct InstanceConfig {
     pub project_path: String,
     pub port: u16,
     pub auto_start: bool,
+    #[serde(default = "default_opencode_path")]
+    pub opencode_path: String,
+}
+
+fn default_opencode_path() -> String {
+    "opencode".to_string()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -115,6 +121,7 @@ mod tests {
             project_path: "/path/to/project".to_string(),
             port: 8080,
             auto_start: false,
+            opencode_path: "opencode".to_string(),
         };
 
         let json = serde_json::to_string(&config).unwrap();
