@@ -1,10 +1,11 @@
 use crate::bot::{BotState, Command};
 use crate::types::error::{OutpostError, Result};
 use crate::types::instance::InstanceType;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use teloxide::prelude::*;
-use tracing::debug;
+use tracing::{debug, warn};
 
 pub async fn handle_clear(
     bot: Bot,
@@ -55,6 +56,25 @@ pub async fn handle_clear(
             .map_err(|e| OutpostError::database_error(e.to_string()))?;
         drop(topic_store);
         debug!(topic_id = mapping.topic_id, "Stale mapping deleted");
+
+        let project_path = Path::new(&mapping.project_path);
+        let base_path = &state.config.project_base_path;
+        if project_path.starts_with(base_path) && project_path != base_path {
+            if project_path.is_dir() {
+                match std::fs::remove_dir_all(project_path) {
+                    Ok(()) => {
+                        debug!(path = %mapping.project_path, "Removed stale project directory");
+                    }
+                    Err(e) => {
+                        warn!(
+                            path = %mapping.project_path,
+                            error = %e,
+                            "Failed to remove stale project directory"
+                        );
+                    }
+                }
+            }
+        }
 
         cleared_projects.push(mapping.project_path);
     }
@@ -345,6 +365,102 @@ mod tests {
         assert!(response.contains("- /test/project-0"));
         assert!(response.contains("- /test/project-1"));
         assert!(response.contains("- /test/project-2"));
+    }
+
+    #[tokio::test]
+    async fn test_clear_removes_project_directory_under_base_path() {
+        let (state, temp_dir) = create_test_state().await;
+
+        let project_dir = temp_dir.path().join("stale-project");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        std::fs::write(project_dir.join("dummy.txt"), "test").unwrap();
+        assert!(project_dir.is_dir());
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let old_time = now - (8 * 24 * 60 * 60);
+
+        let mapping = TopicMapping {
+            topic_id: 500,
+            chat_id: -1001234567890,
+            project_path: project_dir.to_string_lossy().to_string(),
+            session_id: Some("ses_stale".to_string()),
+            instance_id: None,
+            streaming_enabled: false,
+            topic_name_updated: false,
+            created_at: old_time,
+            updated_at: old_time,
+        };
+
+        let topic_store = state.topic_store.lock().await;
+        topic_store.save_mapping(&mapping).await.unwrap();
+        drop(topic_store);
+
+        let topic_store = state.topic_store.lock().await;
+        let stale = topic_store
+            .get_stale_mappings(Duration::from_secs(7 * 24 * 60 * 60))
+            .await
+            .unwrap();
+        drop(topic_store);
+        assert_eq!(stale.len(), 1);
+
+        let base_path = &state.config.project_base_path;
+        for m in &stale {
+            let path = std::path::Path::new(&m.project_path);
+            if path.starts_with(base_path) && path != base_path && path.is_dir() {
+                std::fs::remove_dir_all(path).unwrap();
+            }
+        }
+
+        assert!(!project_dir.exists());
+    }
+
+    #[tokio::test]
+    async fn test_clear_does_not_remove_directory_outside_base_path() {
+        let (state, _temp_dir) = create_test_state().await;
+
+        let external_dir = TempDir::new().unwrap();
+        let external_path = external_dir.path().join("linked-project");
+        std::fs::create_dir_all(&external_path).unwrap();
+        assert!(external_path.is_dir());
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let old_time = now - (8 * 24 * 60 * 60);
+
+        let mapping = TopicMapping {
+            topic_id: 600,
+            chat_id: -1001234567890,
+            project_path: external_path.to_string_lossy().to_string(),
+            session_id: Some("ses_linked".to_string()),
+            instance_id: None,
+            streaming_enabled: false,
+            topic_name_updated: false,
+            created_at: old_time,
+            updated_at: old_time,
+        };
+
+        let topic_store = state.topic_store.lock().await;
+        topic_store.save_mapping(&mapping).await.unwrap();
+        drop(topic_store);
+
+        let topic_store = state.topic_store.lock().await;
+        let stale = topic_store
+            .get_stale_mappings(Duration::from_secs(7 * 24 * 60 * 60))
+            .await
+            .unwrap();
+        drop(topic_store);
+        assert_eq!(stale.len(), 1);
+
+        let base_path = &state.config.project_base_path;
+        let path = std::path::Path::new(&stale[0].project_path);
+        assert!(!path.starts_with(base_path));
+
+        assert!(external_path.is_dir());
     }
 
     #[tokio::test]
