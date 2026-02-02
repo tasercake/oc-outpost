@@ -49,8 +49,8 @@ impl OrchestratorStore {
 
         sqlx::query(
             "INSERT OR REPLACE INTO instances 
-              (id, project_path, port, state, instance_type, session_id, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+              (id, project_path, port, state, instance_type, session_id, container_id, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&instance.id)
         .bind(&instance.project_path)
@@ -58,6 +58,7 @@ impl OrchestratorStore {
         .bind(serde_json::to_string(&instance.state)?)
         .bind(serde_json::to_string(&instance.instance_type)?)
         .bind(session_id)
+        .bind(&instance.container_id)
         .bind(created_at)
         .bind(now)
         .execute(&self.pool)
@@ -145,6 +146,27 @@ impl OrchestratorStore {
         Ok(())
     }
 
+    pub async fn update_container_id(&self, id: &str, container_id: Option<&str>) -> Result<()> {
+        debug!(
+            instance_id = %id,
+            container_id = ?container_id,
+            "Updating instance container_id in DB"
+        );
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_millis() as i64;
+
+        sqlx::query("UPDATE instances SET container_id = ?, updated_at = ? WHERE id = ?")
+            .bind(container_id)
+            .bind(now)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn delete_instance(&self, id: &str) -> Result<()> {
         debug!(instance_id = %id, "Deleting instance from DB");
 
@@ -186,6 +208,7 @@ impl OrchestratorStore {
             state: serde_json::from_str(&state_str)?,
             instance_type: serde_json::from_str(&type_str)?,
             pid: None,
+            container_id: row.try_get("container_id").ok().flatten(),
             started_at: None,
             stopped_at: None,
         })
@@ -205,6 +228,7 @@ mod tests {
             state: InstanceState::Running,
             instance_type: InstanceType::Managed,
             pid: None,
+            container_id: None,
             started_at: None,
             stopped_at: None,
         }
@@ -650,5 +674,53 @@ mod tests {
         let new_created_at: i64 = row2.get("created_at");
 
         assert_eq!(original_created_at, new_created_at);
+    }
+
+    #[tokio::test]
+    async fn test_save_instance_with_container_id() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let store = OrchestratorStore::new(&db_path).await.unwrap();
+
+        let mut instance = create_test_instance("test-cid", 4100, "/test/path");
+        instance.container_id = Some("abc123".to_string());
+        store.save_instance(&instance, None).await.unwrap();
+
+        let retrieved = store.get_instance("test-cid").await.unwrap().unwrap();
+        assert_eq!(retrieved.container_id, Some("abc123".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_save_instance_with_none_container_id() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let store = OrchestratorStore::new(&db_path).await.unwrap();
+
+        let instance = create_test_instance("test-cid-none", 4101, "/test/path2");
+        store.save_instance(&instance, None).await.unwrap();
+
+        let retrieved = store.get_instance("test-cid-none").await.unwrap().unwrap();
+        assert_eq!(retrieved.container_id, None);
+    }
+
+    #[tokio::test]
+    async fn test_update_container_id() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let store = OrchestratorStore::new(&db_path).await.unwrap();
+
+        let instance = create_test_instance("test-ucid", 4102, "/test/path3");
+        store.save_instance(&instance, None).await.unwrap();
+
+        store
+            .update_container_id("test-ucid", Some("container-xyz"))
+            .await
+            .unwrap();
+        let retrieved = store.get_instance("test-ucid").await.unwrap().unwrap();
+        assert_eq!(retrieved.container_id, Some("container-xyz".to_string()));
+
+        store.update_container_id("test-ucid", None).await.unwrap();
+        let retrieved = store.get_instance("test-ucid").await.unwrap().unwrap();
+        assert_eq!(retrieved.container_id, None);
     }
 }

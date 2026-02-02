@@ -41,6 +41,7 @@ pub struct InstanceInfo {
     pub project_path: String,
     pub port: u16,
     pub pid: Option<u32>,
+    pub container_id: Option<String>,
     pub started_at: Option<i64>,
     pub stopped_at: Option<i64>,
 }
@@ -187,6 +188,7 @@ mod tests {
             project_path: "/path/to/project".to_string(),
             port: 3000,
             pid: Some(12345),
+            container_id: None,
             started_at: Some(1640000000),
             stopped_at: None,
         };

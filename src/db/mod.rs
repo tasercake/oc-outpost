@@ -20,6 +20,9 @@ pub async fn init_orchestrator_db(db_path: &Path) -> Result<SqlitePool> {
     let migration = include_str!("../../migrations/001_create_instances_table.sql");
     sqlx::query(migration).execute(&pool).await?;
 
+    let migration_004 = include_str!("../../migrations/004_add_container_id.sql");
+    let _ = sqlx::query(migration_004).execute(&pool).await;
+
     Ok(pool)
 }
 
