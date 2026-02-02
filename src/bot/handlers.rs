@@ -12,6 +12,7 @@ pub mod help;
 pub mod link;
 pub mod new;
 pub mod permissions;
+pub mod projects;
 pub mod session;
 pub mod sessions;
 pub mod status;
@@ -31,6 +32,8 @@ pub use link::handle_link;
 pub use new::handle_new;
 #[allow(unused_imports)]
 pub use permissions::{handle_permission_callback, handle_permission_request};
+#[allow(unused_imports)]
+pub use projects::handle_projects;
 #[allow(unused_imports)]
 pub use session::handle_session;
 #[allow(unused_imports)]
@@ -56,6 +59,7 @@ mod tests {
         let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_status;
         let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_clear;
         let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = help::handle_help;
+        let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_projects;
     }
 
     #[test]
