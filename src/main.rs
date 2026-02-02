@@ -3,6 +3,7 @@ mod bot;
 mod config;
 mod db;
 mod forum;
+mod git;
 mod integration;
 mod opencode;
 mod orchestrator;
