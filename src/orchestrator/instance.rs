@@ -281,12 +281,6 @@ impl OpenCodeInstance {
         *guard = new_state;
     }
 
-    /// Get the container ID if available.
-    pub async fn container_id(&self) -> Option<String> {
-        let guard = self.container_id.lock().await;
-        guard.clone()
-    }
-
     /// Check if the process has crashed (exited unexpectedly).
     ///
     /// Returns true if the process was running but has now exited.
@@ -454,14 +448,6 @@ mod tests {
         assert_eq!(instance.state().await, InstanceState::Running);
     }
 
-    #[tokio::test]
-    async fn test_external_instance_container_id_none() {
-        let config = test_config("test-3", "/tmp/project");
-        let instance = OpenCodeInstance::external(config, 4102, Some(99999)).unwrap();
-
-        assert_eq!(instance.container_id().await, None);
-    }
-
     // ==================== Port Getter Tests ====================
 
     #[tokio::test]
@@ -579,10 +565,6 @@ mod tests {
                 .unwrap();
 
         assert_eq!(instance.state().await, InstanceState::Running);
-        assert_eq!(
-            instance.container_id().await,
-            Some("mock-container-id-abc123".to_string())
-        );
         assert_eq!(container_id, "mock-container-id-abc123".to_string());
 
         let actions = runtime.recorded_actions();
@@ -605,7 +587,6 @@ mod tests {
         instance.stop().await.unwrap();
 
         assert_eq!(instance.state().await, InstanceState::Stopped);
-        assert_eq!(instance.container_id().await, None);
 
         let actions = runtime.recorded_actions();
         assert!(matches!(actions[2], MockAction::StopContainer { .. }));
@@ -652,7 +633,6 @@ mod tests {
         let crashed = instance.check_for_crash().await.unwrap();
         assert!(crashed);
         assert_eq!(instance.state().await, InstanceState::Error);
-        assert_eq!(instance.container_id().await, None);
     }
 
     #[tokio::test]
@@ -674,7 +654,6 @@ mod tests {
         let crashed = instance.check_for_crash().await.unwrap();
         assert!(!crashed);
         assert_eq!(instance.state().await, InstanceState::Stopped);
-        assert_eq!(instance.container_id().await, None);
     }
 
     #[tokio::test]

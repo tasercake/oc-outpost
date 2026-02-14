@@ -96,6 +96,12 @@ fn format_session_info(mapping: &TopicMapping, instance: Option<&InstanceInfo>) 
         output.push_str(&format!("Type: {:?}\n", inst.instance_type));
         output.push_str(&format!("Status: {:?}\n", inst.state));
         output.push_str(&format!("Port: {}\n", inst.port));
+        if let Some(container_id) = &inst.container_id {
+            output.push_str(&format!(
+                "Container: {}\n",
+                &container_id[..12.min(container_id.len())]
+            ));
+        }
     } else {
         output.push_str("Type: (not available)\n");
         output.push_str("Status: (not available)\n");
@@ -338,5 +344,38 @@ mod tests {
         assert!(output.contains("Port: 4103"));
         assert!(output.contains("Session: ses_ext123"));
         assert!(output.contains("Streaming: OFF"));
+        assert!(!output.contains("Container:"));
+    }
+
+    #[test]
+    fn test_format_with_container_id() {
+        let mapping = TopicMapping {
+            topic_id: 111,
+            chat_id: -1003333333333,
+            project_path: "/docker/project".to_string(),
+            session_id: Some("ses_docker".to_string()),
+            instance_id: Some("inst_docker".to_string()),
+            streaming_enabled: false,
+            topic_name_updated: false,
+            created_at: 1660000000,
+            updated_at: 1660000300,
+        };
+
+        let instance = InstanceInfo {
+            id: "inst_docker".to_string(),
+            state: InstanceState::Running,
+            instance_type: InstanceType::Managed,
+            project_path: "/docker/project".to_string(),
+            port: 4104,
+            pid: None,
+            container_id: Some("a1b2c3d4e5f6789012345678".to_string()),
+            started_at: Some(1660000000),
+            stopped_at: None,
+        };
+
+        let output = format_session_info(&mapping, Some(&instance));
+
+        assert!(output.contains("Container: a1b2c3d4e5f6"));
+        assert!(!output.contains("a1b2c3d4e5f6789012345678"));
     }
 }

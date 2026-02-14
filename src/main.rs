@@ -145,6 +145,11 @@ async fn main() -> Result<()> {
     info!("Recovering instances from database...");
     instance_manager.recover_from_db().await?;
 
+    info!("Reconciling containers...");
+    if let Err(e) = instance_manager.reconcile_containers().await {
+        warn!(error = %e, "Container reconciliation failed (Docker may not be available)");
+    }
+
     info!("Starting health check loop...");
     let _health_check_handle = instance_manager.start_health_check_loop();
 

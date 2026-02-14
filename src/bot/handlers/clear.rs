@@ -190,22 +190,20 @@ async fn cleanup_candidate(state: &BotState, candidate: CleanupCandidate) -> Res
 
     let project_path = Path::new(&candidate.mapping.project_path);
     let base_path = &state.config.project_base_path;
-    if project_path.starts_with(base_path) && project_path != base_path {
-        if project_path.is_dir() {
-            match std::fs::remove_dir_all(project_path) {
-                Ok(()) => {
-                    debug!(
-                        path = %candidate.mapping.project_path,
-                        "Removed stale project directory"
-                    );
-                }
-                Err(e) => {
-                    warn!(
-                        path = %candidate.mapping.project_path,
-                        error = %e,
-                        "Failed to remove stale project directory"
-                    );
-                }
+    if project_path.starts_with(base_path) && project_path != base_path && project_path.is_dir() {
+        match std::fs::remove_dir_all(project_path) {
+            Ok(()) => {
+                debug!(
+                    path = %candidate.mapping.project_path,
+                    "Removed stale project directory"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    path = %candidate.mapping.project_path,
+                    error = %e,
+                    "Failed to remove stale project directory"
+                );
             }
         }
     }
