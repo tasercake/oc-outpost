@@ -113,8 +113,11 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use crate::forum::TopicStore;
+    use crate::orchestrator::container::{mock::MockRuntime, ContainerRuntime};
     use crate::orchestrator::store::OrchestratorStore;
     use crate::types::forum::TopicMapping;
+    use std::path::PathBuf;
+    use std::sync::Arc;
     use std::time::Duration;
     use tempfile::TempDir;
 
@@ -139,6 +142,10 @@ mod tests {
             auto_create_project_dirs: true,
             api_port: 4200,
             api_key: None,
+            docker_image: "ghcr.io/sst/opencode".to_string(),
+            opencode_config_path: PathBuf::from("/tmp/oc-config"),
+            container_port: 8080,
+            env_passthrough: vec![],
         };
 
         let orchestrator_store = OrchestratorStore::new(&config.orchestrator_db_path)
@@ -148,10 +155,12 @@ mod tests {
 
         let store_for_manager = orchestrator_store.clone();
         let port_pool = crate::orchestrator::port_pool::PortPool::new(4100, 10);
+        let runtime: Arc<dyn ContainerRuntime> = Arc::new(MockRuntime::new());
         let instance_manager = crate::orchestrator::manager::InstanceManager::new(
             std::sync::Arc::new(config.clone()),
             store_for_manager,
             port_pool,
+            runtime,
         )
         .await
         .unwrap();

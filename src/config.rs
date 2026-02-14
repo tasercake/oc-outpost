@@ -33,6 +33,12 @@ pub struct Config {
     // API (2 fields)
     pub api_port: u16,
     pub api_key: Option<String>,
+
+    // Docker (4 fields)
+    pub docker_image: String,
+    pub opencode_config_path: PathBuf,
+    pub container_port: u16,
+    pub env_passthrough: Vec<String>,
 }
 
 impl Config {
@@ -146,6 +152,26 @@ impl Config {
 
         let api_key = std::env::var("API_KEY").ok();
 
+        let docker_image = std::env::var("OPENCODE_DOCKER_IMAGE")
+            .unwrap_or_else(|_| "ghcr.io/sst/opencode".to_string());
+
+        let opencode_config_path_raw = std::env::var("OPENCODE_CONFIG_PATH")
+            .unwrap_or_else(|_| "~/.config/opencode/".to_string());
+        let opencode_config_path =
+            PathBuf::from(shellexpand::tilde(&opencode_config_path_raw).into_owned());
+
+        let container_port = std::env::var("OPENCODE_CONTAINER_PORT")
+            .unwrap_or_else(|_| "8080".to_string())
+            .parse::<u16>()
+            .map_err(|_| anyhow!("OPENCODE_CONTAINER_PORT must be a valid port number"))?;
+
+        let env_passthrough = std::env::var("OPENCODE_ENV_PASSTHROUGH")
+            .unwrap_or_else(|_| "ANTHROPIC_API_KEY,OPENAI_API_KEY".to_string())
+            .split(',')
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.trim().to_string())
+            .collect::<Vec<_>>();
+
         debug!(
             opencode_path = ?opencode_path,
             max_instances = opencode_max_instances,
@@ -161,6 +187,10 @@ impl Config {
             auto_create_dirs = auto_create_project_dirs,
             api_port = api_port,
             has_api_key = api_key.is_some(),
+            docker_image = %docker_image,
+            opencode_config_path = %opencode_config_path.display(),
+            container_port = container_port,
+            env_passthrough_count = env_passthrough.len(),
             allowed_users_count = telegram_allowed_users.len(),
             handle_general_topic = handle_general_topic,
             "Config resolved from environment"
@@ -185,6 +215,10 @@ impl Config {
             auto_create_project_dirs,
             api_port,
             api_key,
+            docker_image,
+            opencode_config_path,
+            container_port,
+            env_passthrough,
         })
     }
 }
@@ -193,7 +227,7 @@ impl std::fmt::Display for Config {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Config {{\n  telegram_bot_token: ***MASKED***,\n  telegram_chat_id: {},\n  telegram_allowed_users: {:?},\n  handle_general_topic: {},\n  opencode_path: {:?},\n  opencode_max_instances: {},\n  opencode_idle_timeout: {:?},\n  opencode_port_start: {},\n  opencode_port_pool_size: {},\n  opencode_health_check_interval: {:?},\n  opencode_startup_timeout: {:?},\n  orchestrator_db_path: {:?},\n  topic_db_path: {:?},\n  log_db_path: {:?},\n  project_base_path: {:?},\n  auto_create_project_dirs: {},\n  api_port: {},\n  api_key: {},\n}}",
+            "Config {{\n  telegram_bot_token: ***MASKED***,\n  telegram_chat_id: {},\n  telegram_allowed_users: {:?},\n  handle_general_topic: {},\n  opencode_path: {:?},\n  opencode_max_instances: {},\n  opencode_idle_timeout: {:?},\n  opencode_port_start: {},\n  opencode_port_pool_size: {},\n  opencode_health_check_interval: {:?},\n  opencode_startup_timeout: {:?},\n  orchestrator_db_path: {:?},\n  topic_db_path: {:?},\n  log_db_path: {:?},\n  project_base_path: {:?},\n  auto_create_project_dirs: {},\n  api_port: {},\n  api_key: {},\n  docker_image: {:?},\n  opencode_config_path: {:?},\n  container_port: {},\n  env_passthrough: {:?},\n}}",
             self.telegram_chat_id,
             self.telegram_allowed_users,
             self.handle_general_topic,
@@ -210,7 +244,11 @@ impl std::fmt::Display for Config {
             self.project_base_path,
             self.auto_create_project_dirs,
             self.api_port,
-            if self.api_key.is_some() { "***MASKED***" } else { "None" }
+            if self.api_key.is_some() { "***MASKED***" } else { "None" },
+            self.docker_image,
+            self.opencode_config_path,
+            self.container_port,
+            self.env_passthrough
         )
     }
 }
@@ -241,6 +279,10 @@ mod tests {
             "AUTO_CREATE_PROJECT_DIRS",
             "API_PORT",
             "API_KEY",
+            "OPENCODE_DOCKER_IMAGE",
+            "OPENCODE_CONFIG_PATH",
+            "OPENCODE_CONTAINER_PORT",
+            "OPENCODE_ENV_PASSTHROUGH",
         ] {
             std::env::remove_var(var);
         }
@@ -344,6 +386,13 @@ mod tests {
         assert!(config.handle_general_topic);
         assert!(config.telegram_allowed_users.is_empty());
         assert!(config.api_key.is_none());
+        assert_eq!(config.docker_image, "ghcr.io/sst/opencode");
+        assert!(!config.opencode_config_path.to_string_lossy().contains("~"));
+        assert_eq!(config.container_port, 8080);
+        assert_eq!(
+            config.env_passthrough,
+            vec!["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
+        );
     }
 
     #[test]
@@ -521,8 +570,12 @@ mod tests {
         std::env::set_var("LOG_DB_PATH", "./custom/logs.db");
         std::env::set_var("PROJECT_BASE_PATH", "~/projects");
         std::env::set_var("AUTO_CREATE_PROJECT_DIRS", "false");
-        std::env::set_var("API_PORT", "8080");
+        std::env::set_var("API_PORT", "8888");
         std::env::set_var("API_KEY", "my-secret-key");
+        std::env::set_var("OPENCODE_DOCKER_IMAGE", "custom/opencode:latest");
+        std::env::set_var("OPENCODE_CONFIG_PATH", "~/myconfig");
+        std::env::set_var("OPENCODE_CONTAINER_PORT", "9090");
+        std::env::set_var("OPENCODE_ENV_PASSTHROUGH", "KEY1,KEY2,KEY3");
 
         let config = Config::from_env_no_dotenv().expect("Config should load all fields");
 
@@ -556,7 +609,56 @@ mod tests {
         assert_eq!(config.topic_db_path, PathBuf::from("./custom/topics.db"));
         assert_eq!(config.log_db_path, PathBuf::from("./custom/logs.db"));
         assert!(!config.auto_create_project_dirs);
-        assert_eq!(config.api_port, 8080);
+        assert_eq!(config.api_port, 8888);
         assert_eq!(config.api_key, Some("my-secret-key".to_string()));
+        assert_eq!(config.docker_image, "custom/opencode:latest");
+        assert!(!config.opencode_config_path.to_string_lossy().contains("~"));
+        assert_eq!(config.container_port, 9090);
+        assert_eq!(config.env_passthrough, vec!["KEY1", "KEY2", "KEY3"]);
+    }
+
+    #[test]
+    #[serial]
+    fn test_invalid_container_port() {
+        clean_config_env();
+        std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
+        std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
+        std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
+        std::env::set_var("OPENCODE_CONTAINER_PORT", "not-a-port");
+
+        let result = Config::from_env_no_dotenv();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("OPENCODE_CONTAINER_PORT must be a valid port number"));
+        clean_config_env();
+    }
+
+    #[test]
+    #[serial]
+    fn test_env_passthrough_empty_string() {
+        clean_config_env();
+        std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
+        std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
+        std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
+        std::env::set_var("OPENCODE_ENV_PASSTHROUGH", "");
+
+        let config = Config::from_env_no_dotenv().expect("Config should handle empty passthrough");
+        assert!(config.env_passthrough.is_empty());
+    }
+
+    #[test]
+    #[serial]
+    fn test_opencode_config_path_tilde_expansion() {
+        clean_config_env();
+        std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
+        std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
+        std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
+        std::env::set_var("OPENCODE_CONFIG_PATH", "~/custom/config");
+
+        let config = Config::from_env_no_dotenv().expect("Config should expand tilde");
+        assert!(!config.opencode_config_path.to_string_lossy().contains("~"));
+        assert!(!config.opencode_config_path.to_string_lossy().is_empty());
     }
 }

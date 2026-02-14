@@ -78,6 +78,7 @@ async fn register(
         project_path: payload.project_path.clone(),
         port: payload.port,
         pid: None,
+        container_id: None,
         started_at: Some(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -370,6 +371,7 @@ mod tests {
             project_path: "/test/project".to_string(),
             port: 4096,
             pid: None,
+            container_id: None,
             started_at: Some(1234567890),
             stopped_at: None,
         };
@@ -415,6 +417,7 @@ mod tests {
             project_path: "/test/project".to_string(),
             port: 4096,
             pid: None,
+            container_id: None,
             started_at: Some(1234567890),
             stopped_at: None,
         };
@@ -471,6 +474,7 @@ mod tests {
             project_path: "/test/project1".to_string(),
             port: 4096,
             pid: None,
+            container_id: None,
             started_at: Some(1234567890),
             stopped_at: None,
         };
@@ -487,6 +491,7 @@ mod tests {
             project_path: "/test/project2".to_string(),
             port: 4097,
             pid: None,
+            container_id: None,
             started_at: Some(1234567891),
             stopped_at: None,
         };

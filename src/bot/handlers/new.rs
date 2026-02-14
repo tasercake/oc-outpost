@@ -1,4 +1,5 @@
 use crate::bot::{BotState, Command};
+use crate::git::worktree::{create_worktree, is_git_repo, sanitize_branch_name};
 use crate::types::error::{OutpostError, Result};
 use crate::types::forum::TopicMapping;
 use std::sync::Arc;
@@ -42,7 +43,7 @@ fn is_general_topic(msg: &Message) -> bool {
 /// Steps:
 /// 1. Extract and validate project name
 /// 2. Check if General topic (reject if HANDLE_GENERAL_TOPIC=false)
-/// 3. Create project directory (if AUTO_CREATE_PROJECT_DIRS=true)
+/// 3. Resolve existing project directory and optional worktree
 /// 4. Create forum topic
 /// 5. Spawn OpenCode instance via InstanceManager
 /// 6. Create topic mapping in TopicStore
@@ -85,29 +86,46 @@ pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotStat
     let project_path = state.config.project_base_path.join(&name);
     debug!(project_path = %project_path.display(), "Resolved project path");
 
-    // Check if directory already exists
     debug!(project_path = %project_path.display(), exists = project_path.exists(), "Project directory existence check");
-    if project_path.exists() {
+    if !project_path.is_dir() {
         bot.send_message(
             msg.chat.id,
-            format!("Project directory '{}' already exists.", name),
+            format!(
+                "Directory '{}' not found under {}. Use /projects to see available directories.",
+                name,
+                state.config.project_base_path.display()
+            ),
         )
         .await
         .map_err(|e| OutpostError::telegram_error(e.to_string()))?;
         return Ok(());
     }
 
-    // Create project directory if enabled
-    debug!(project_path = %project_path.display(), auto_create = state.config.auto_create_project_dirs, "Creating project directory");
-    if state.config.auto_create_project_dirs {
-        std::fs::create_dir_all(&project_path).map_err(|e| {
-            OutpostError::io_error(format!(
-                "Failed to create project directory '{}': {}",
-                project_path.display(),
-                e
-            ))
-        })?;
-    }
+    let mut worktree_branch = None;
+    let effective_project_path = if is_git_repo(&project_path) {
+        let sanitized = sanitize_branch_name(&name);
+        worktree_branch = Some(format!("wt/{}", sanitized));
+        match create_worktree(&project_path, &name, &state.config.project_base_path).await {
+            Ok(path) => path,
+            Err(e) => {
+                bot.send_message(msg.chat.id, format!("Failed to create worktree: {}", e))
+                    .await
+                    .map_err(|e| OutpostError::telegram_error(e.to_string()))?;
+                return Ok(());
+            }
+        }
+    } else {
+        bot.send_message(
+            msg.chat.id,
+            format!(
+                "⚠️ Note: '{}' is not a git repository. Mounting directly without worktree isolation.",
+                name
+            ),
+        )
+        .await
+        .map_err(|e| OutpostError::telegram_error(e.to_string()))?;
+        project_path.clone()
+    };
 
     // Create forum topic
     let forum_topic = match bot.create_forum_topic(msg.chat.id, &name).await {
@@ -127,7 +145,7 @@ pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotStat
     // Spawn OpenCode instance via InstanceManager
     let instance_lock = state
         .instance_manager
-        .get_or_create(&project_path)
+        .get_or_create(&effective_project_path)
         .await
         .map_err(|e| OutpostError::io_error(format!("Failed to spawn instance: {}", e)))?;
 
@@ -147,7 +165,7 @@ pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotStat
     let mapping = TopicMapping {
         topic_id: forum_topic.thread_id.0 .0,
         chat_id: msg.chat.id.0,
-        project_path: project_path.to_string_lossy().to_string(),
+        project_path: effective_project_path.to_string_lossy().to_string(),
         session_id: None,
         instance_id: Some(instance_id.clone()),
         streaming_enabled: false,
@@ -168,14 +186,19 @@ pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotStat
     );
 
     // Send confirmation to the new topic with actual port
+    let worktree_info = worktree_branch
+        .as_ref()
+        .map(|branch| format!("\n🌿 Worktree branch: {}", branch))
+        .unwrap_or_default();
     let confirmation = format!(
         "🚀 Project '{}' created!\n\n\
-         📁 Path: {}\n\
+         📁 Path: {}{}\n\
          🆔 Instance: {}\n\
          🔌 Port: {}\n\n\
          Send a message here to start your OpenCode session.",
         name,
-        project_path.display(),
+        effective_project_path.display(),
+        worktree_info,
         instance_id,
         port
     );
@@ -196,6 +219,7 @@ pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotStat
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn test_validate_project_name_valid() {
@@ -297,5 +321,13 @@ mod tests {
         assert!(validate_project_name("project\nname").is_err());
         assert!(validate_project_name(" project").is_err());
         assert!(validate_project_name("project ").is_err());
+    }
+
+    #[test]
+    fn test_is_git_repo_integration() {
+        let dir = TempDir::new().unwrap();
+        assert!(!is_git_repo(dir.path()));
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        assert!(is_git_repo(dir.path()));
     }
 }

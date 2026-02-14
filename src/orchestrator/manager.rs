@@ -10,6 +10,7 @@
 //! - Integration with PortPool for port allocation
 
 use crate::config::Config;
+use crate::orchestrator::container::{ContainerConfig, ContainerRuntime};
 use crate::orchestrator::instance::OpenCodeInstance;
 use crate::orchestrator::port_pool::PortPool;
 use crate::orchestrator::store::OrchestratorStore;
@@ -77,6 +78,7 @@ impl Default for ActivityTracker {
 /// - Persistence: Integrates with OrchestratorStore
 pub struct InstanceManager {
     config: Arc<Config>,
+    runtime: Arc<dyn ContainerRuntime>,
     store: Arc<Mutex<OrchestratorStore>>,
     port_pool: Arc<PortPool>,
     instances: Arc<Mutex<HashMap<String, Arc<Mutex<OpenCodeInstance>>>>>,
@@ -96,9 +98,11 @@ impl InstanceManager {
         config: Arc<Config>,
         store: OrchestratorStore,
         port_pool: PortPool,
+        runtime: Arc<dyn ContainerRuntime>,
     ) -> Result<Self> {
         Ok(Self {
             config,
+            runtime,
             store: Arc::new(Mutex::new(store)),
             port_pool: Arc::new(port_pool),
             instances: Arc::new(Mutex::new(HashMap::new())),
@@ -223,6 +227,7 @@ impl InstanceManager {
 
             let store = self.store.lock().await;
             store.update_state(id, InstanceState::Stopped).await?;
+            store.update_container_id(id, None).await?;
 
             let mut instances = self.instances.lock().await;
             instances.remove(id);
@@ -334,6 +339,50 @@ impl InstanceManager {
         Ok(())
     }
 
+    pub async fn reconcile_containers(&self) -> Result<()> {
+        debug!("Starting container reconciliation");
+
+        let containers = self.runtime.list_containers_by_prefix("oc-").await?;
+        let store = self.store.lock().await;
+        let instances = store.get_all_instances().await?;
+        drop(store);
+
+        let mut container_ids = std::collections::HashSet::new();
+        for container in &containers {
+            container_ids.insert(container.id.clone());
+        }
+
+        let mut db_container_ids = std::collections::HashSet::new();
+        for info in &instances {
+            if let Some(container_id) = info.container_id.as_ref() {
+                db_container_ids.insert(container_id.clone());
+                if !container_ids.contains(container_id) {
+                    tracing::warn!(
+                        instance_id = %info.id,
+                        container_id = %container_id,
+                        "Container missing for instance, marking error"
+                    );
+                    let store = self.store.lock().await;
+                    store.update_state(&info.id, InstanceState::Error).await?;
+                }
+            }
+        }
+
+        for container in containers {
+            if !db_container_ids.contains(&container.id) {
+                tracing::info!(
+                    container_id = %container.id,
+                    name = %container.name,
+                    "Orphan container found, stopping and removing"
+                );
+                self.runtime.stop_container(&container.id, 5).await?;
+                self.runtime.remove_container(&container.id, true).await?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Start periodic health check monitoring.
     ///
     /// Spawns a background task that checks instance health and handles:
@@ -346,6 +395,7 @@ impl InstanceManager {
         let store = self.store.clone();
         let port_pool = self.port_pool.clone();
         let config = self.config.clone();
+        let runtime = self.runtime.clone();
         let shutdown_signal = self.shutdown_signal.clone();
 
         tokio::spawn(async move {
@@ -473,8 +523,28 @@ impl InstanceManager {
                                             .to_string(),
                                     };
 
-                                    match OpenCodeInstance::spawn(instance_config, new_port).await {
-                                        Ok(new_instance) => {
+                                    let container_config = ContainerConfig {
+                                        instance_id: new_id.clone(),
+                                        image: config.docker_image.clone(),
+                                        host_port: new_port,
+                                        container_port: config.container_port,
+                                        worktree_path: project_path.clone(),
+                                        config_mount_path: config
+                                            .opencode_config_path
+                                            .to_string_lossy()
+                                            .to_string(),
+                                        env_vars: config.env_passthrough.clone(),
+                                    };
+
+                                    let spawn_result = OpenCodeInstance::spawn(
+                                        instance_config,
+                                        new_port,
+                                        runtime.clone(),
+                                        container_config,
+                                    )
+                                    .await;
+                                    match spawn_result {
+                                        Ok((new_instance, container_id)) => {
                                             let new_instance = Arc::new(Mutex::new(new_instance));
 
                                             let ready = {
@@ -495,6 +565,7 @@ impl InstanceManager {
                                                         project_path: project_path.clone(),
                                                         port: new_port,
                                                         pid: None,
+                                                        container_id: Some(container_id.clone()),
                                                         started_at: Some(
                                                             std::time::SystemTime::now()
                                                                 .duration_since(
@@ -520,6 +591,12 @@ impl InstanceManager {
                                                             port_pool.release(new_port).await;
                                                             continue;
                                                         }
+                                                        let _ = store_guard
+                                                            .update_container_id(
+                                                                &new_id,
+                                                                Some(&container_id),
+                                                            )
+                                                            .await;
                                                         let _ = store_guard
                                                             .update_state(&id, InstanceState::Error)
                                                             .await;
@@ -687,8 +764,29 @@ impl InstanceManager {
             opencode_path: self.config.opencode_path.to_string_lossy().to_string(),
         };
 
+        let container_config = ContainerConfig {
+            instance_id: id.clone(),
+            image: self.config.docker_image.clone(),
+            host_port: port,
+            container_port: self.config.container_port,
+            worktree_path: path_str.to_string(),
+            config_mount_path: self
+                .config
+                .opencode_config_path
+                .to_string_lossy()
+                .to_string(),
+            env_vars: self.config.env_passthrough.clone(),
+        };
+
         // Spawn instance
-        let instance = match OpenCodeInstance::spawn(instance_config.clone(), port).await {
+        let spawn_result = OpenCodeInstance::spawn(
+            instance_config.clone(),
+            port,
+            self.runtime.clone(),
+            container_config,
+        )
+        .await;
+        let (instance, container_id) = match spawn_result {
             Ok(inst) => inst,
             Err(e) => {
                 // Release port on failure
@@ -729,6 +827,7 @@ impl InstanceManager {
             project_path: path_str.to_string(),
             port,
             pid: None,
+            container_id: Some(container_id.clone()),
             started_at: Some(
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -740,6 +839,7 @@ impl InstanceManager {
 
         let store = self.store.lock().await;
         store.save_instance(&info, None).await?;
+        store.update_container_id(&id, Some(&container_id)).await?;
         drop(store);
         debug!(instance_id = %id, "Instance saved to database");
 
@@ -858,9 +958,11 @@ impl InstanceManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::orchestrator::container::mock::{MockAction, MockRuntime};
+    use crate::orchestrator::container::{ContainerInfo, ContainerState};
     use tempfile::TempDir;
 
-    async fn create_test_manager() -> (InstanceManager, TempDir) {
+    async fn create_test_manager() -> (InstanceManager, TempDir, Arc<MockRuntime>) {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
 
@@ -884,35 +986,40 @@ mod tests {
             auto_create_project_dirs: true,
             api_port: 4200,
             api_key: None,
+            docker_image: "ghcr.io/sst/opencode".to_string(),
+            opencode_config_path: std::path::PathBuf::from("/tmp/oc-config"),
+            container_port: 8080,
+            env_passthrough: vec![],
         };
 
         let store = OrchestratorStore::new(&db_path).await.unwrap();
         let port_pool = PortPool::new(14100, 10);
+        let runtime = Arc::new(MockRuntime::new());
 
-        let manager = InstanceManager::new(Arc::new(config), store, port_pool)
+        let manager = InstanceManager::new(Arc::new(config), store, port_pool, runtime.clone())
             .await
             .unwrap();
 
-        (manager, temp_dir)
+        (manager, temp_dir, runtime)
     }
 
     #[tokio::test]
     async fn test_new_creates_manager() {
-        let (manager, _temp_dir) = create_test_manager().await;
+        let (manager, _temp_dir, _runtime) = create_test_manager().await;
         assert_eq!(manager.config.opencode_max_instances, 5);
         assert_eq!(manager.config.opencode_port_start, 14100);
     }
 
     #[tokio::test]
     async fn test_get_instance_returns_none_when_not_found() {
-        let (manager, _temp_dir) = create_test_manager().await;
+        let (manager, _temp_dir, _runtime) = create_test_manager().await;
         let result = manager.get_instance("nonexistent").await;
         assert!(result.is_none());
     }
 
     #[tokio::test]
     async fn test_get_instance_by_path_returns_none_when_not_found() {
-        let (manager, _temp_dir) = create_test_manager().await;
+        let (manager, _temp_dir, _runtime) = create_test_manager().await;
         let result = manager
             .get_instance_by_path(Path::new("/nonexistent/path"))
             .await;
@@ -921,7 +1028,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_status_initial_empty() {
-        let (manager, _temp_dir) = create_test_manager().await;
+        let (manager, _temp_dir, _runtime) = create_test_manager().await;
         let status = manager.get_status().await;
 
         assert_eq!(status.total_instances, 0);
@@ -933,7 +1040,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stop_instance_returns_error_when_not_found() {
-        let (manager, _temp_dir) = create_test_manager().await;
+        let (manager, _temp_dir, _runtime) = create_test_manager().await;
         let result = manager.stop_instance("nonexistent").await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not found"));
@@ -941,21 +1048,117 @@ mod tests {
 
     #[tokio::test]
     async fn test_stop_all_succeeds_when_empty() {
-        let (manager, _temp_dir) = create_test_manager().await;
+        let (manager, _temp_dir, _runtime) = create_test_manager().await;
         let result = manager.stop_all().await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_recover_from_db_succeeds_when_empty() {
-        let (manager, _temp_dir) = create_test_manager().await;
+        let (manager, _temp_dir, _runtime) = create_test_manager().await;
         let result = manager.recover_from_db().await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
+    async fn test_reconcile_orphan_containers_removed() {
+        let (manager, _temp_dir, runtime) = create_test_manager().await;
+
+        let orphan = ContainerInfo {
+            id: "orphan-1".to_string(),
+            name: "oc-orphan-1".to_string(),
+            state: ContainerState::Running,
+        };
+
+        *runtime.list_result.lock().unwrap() = Ok(vec![orphan]);
+
+        manager.reconcile_containers().await.unwrap();
+
+        let actions = runtime.recorded_actions();
+        assert!(matches!(actions[0], MockAction::ListContainers { .. }));
+        assert!(matches!(actions[1], MockAction::StopContainer { ref id, .. } if id == "orphan-1"));
+        assert!(
+            matches!(actions[2], MockAction::RemoveContainer { ref id, .. } if id == "orphan-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_reconcile_db_without_container_marked_error() {
+        let (manager, _temp_dir, runtime) = create_test_manager().await;
+
+        *runtime.list_result.lock().unwrap() = Ok(vec![]);
+
+        let info = InstanceInfo {
+            id: "inst-missing".to_string(),
+            state: InstanceState::Running,
+            instance_type: InstanceType::Managed,
+            project_path: "/tmp/project".to_string(),
+            port: 14101,
+            pid: None,
+            container_id: Some("missing-container".to_string()),
+            started_at: None,
+            stopped_at: None,
+        };
+
+        {
+            let store = manager.store.lock().await;
+            store.save_instance(&info, None).await.unwrap();
+        }
+
+        manager.reconcile_containers().await.unwrap();
+
+        let store = manager.store.lock().await;
+        let updated = store.get_instance("inst-missing").await.unwrap().unwrap();
+        assert_eq!(updated.state, InstanceState::Error);
+    }
+
+    #[tokio::test]
+    async fn test_reconcile_matching_containers_kept() {
+        let (manager, _temp_dir, runtime) = create_test_manager().await;
+
+        let container = ContainerInfo {
+            id: "match-1".to_string(),
+            name: "oc-match-1".to_string(),
+            state: ContainerState::Running,
+        };
+
+        *runtime.list_result.lock().unwrap() = Ok(vec![container]);
+
+        let info = InstanceInfo {
+            id: "inst-match".to_string(),
+            state: InstanceState::Running,
+            instance_type: InstanceType::Managed,
+            project_path: "/tmp/project".to_string(),
+            port: 14102,
+            pid: None,
+            container_id: Some("match-1".to_string()),
+            started_at: None,
+            stopped_at: None,
+        };
+
+        {
+            let store = manager.store.lock().await;
+            store.save_instance(&info, None).await.unwrap();
+        }
+
+        manager.reconcile_containers().await.unwrap();
+
+        let actions = runtime.recorded_actions();
+        assert!(actions
+            .iter()
+            .all(|action| !matches!(action, MockAction::StopContainer { .. })));
+        assert!(actions
+            .iter()
+            .all(|action| !matches!(action, MockAction::RemoveContainer { .. })));
+
+        let store = manager.store.lock().await;
+        let updated = store.get_instance("inst-match").await.unwrap().unwrap();
+        assert_eq!(updated.state, InstanceState::Running);
+    }
+
+    #[tokio::test]
     async fn test_record_activity_creates_tracker() {
-        let (manager, _temp_dir) = create_test_manager().await;
+        let (manager, _temp_dir, _runtime) = create_test_manager().await;
         manager.record_activity("test-instance").await;
 
         let activity_trackers = manager.activity_trackers.lock().await;
@@ -964,7 +1167,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_record_activity_updates_timestamp() {
-        let (manager, _temp_dir) = create_test_manager().await;
+        let (manager, _temp_dir, _runtime) = create_test_manager().await;
         manager.record_activity("test-instance").await;
 
         // Wait a bit
@@ -1041,12 +1244,17 @@ mod tests {
             auto_create_project_dirs: true,
             api_port: 4200,
             api_key: None,
+            docker_image: "ghcr.io/sst/opencode".to_string(),
+            opencode_config_path: std::path::PathBuf::from("/tmp/oc-config"),
+            container_port: 8080,
+            env_passthrough: vec![],
         };
 
         let store = OrchestratorStore::new(&db_path).await.unwrap();
         let port_pool = PortPool::new(14200, 10);
+        let runtime = Arc::new(MockRuntime::new());
 
-        let manager = InstanceManager::new(Arc::new(config), store, port_pool)
+        let manager = InstanceManager::new(Arc::new(config), store, port_pool, runtime)
             .await
             .unwrap();
 
@@ -1076,7 +1284,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_concurrent_access_to_manager() {
-        let (manager, _temp_dir) = create_test_manager().await;
+        let (manager, _temp_dir, _runtime) = create_test_manager().await;
         let manager = Arc::new(manager);
 
         // Spawn multiple concurrent tasks
@@ -1106,7 +1314,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_health_check_loop_can_be_stopped() {
-        let (manager, _temp_dir) = create_test_manager().await;
+        let (manager, _temp_dir, _runtime) = create_test_manager().await;
 
         // Start health check loop
         let handle = manager.start_health_check_loop();
@@ -1124,7 +1332,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_port_allocation_on_spawn_failure() {
-        let (manager, temp_dir) = create_test_manager().await;
+        let (manager, temp_dir, runtime) = create_test_manager().await;
 
         // Port pool should have all ports available initially
         let initial_count = manager.port_pool.allocated_count();
@@ -1134,9 +1342,14 @@ mod tests {
         let project_path = temp_dir.path().join("test-project");
         std::fs::create_dir_all(&project_path).unwrap();
 
+        {
+            let mut create_result = runtime.create_result.lock().unwrap();
+            *create_result = Err("image not found".to_string());
+        }
+
         let result = manager.get_or_create(&project_path).await;
 
-        // Should fail because opencode binary doesn't exist
+        // Should fail because container creation is forced to error
         assert!(result.is_err());
 
         // Port should be released on failure

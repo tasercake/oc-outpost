@@ -17,6 +17,7 @@ fn format_general_help() -> String {
      /new <name> - Create new project\n\
      /sessions - List all sessions\n\
      /connect <name> - Connect to session\n\
+     /projects - List available projects\n\
      /status - Orchestrator status\n\
      /clear - Clean stale mappings\n\
      /help - This help\n\n\
@@ -24,7 +25,7 @@ fn format_general_help() -> String {
      /session - Show session info\n\
      /link <path> - Link to directory\n\
      /stream - Toggle streaming\n\
-     /disconnect - Disconnect session"
+     /close - Close topic and clean up"
         .to_string()
 }
 
@@ -34,7 +35,7 @@ fn format_topic_help() -> String {
      /session - Show session info\n\
      /link <path> - Link to directory\n\
      /stream - Toggle streaming\n\
-     /disconnect - Disconnect session\n\n\
+     /close - Close topic and clean up\n\n\
      Use /help in General topic for all commands."
         .to_string()
 }
@@ -89,6 +90,7 @@ mod tests {
         assert!(help.contains("/new <name> - Create new project"));
         assert!(help.contains("/sessions - List all sessions"));
         assert!(help.contains("/connect <name> - Connect to session"));
+        assert!(help.contains("/projects - List available projects"));
         assert!(help.contains("/status - Orchestrator status"));
         assert!(help.contains("/clear - Clean stale mappings"));
         assert!(help.contains("/help - This help"));
@@ -98,7 +100,7 @@ mod tests {
         assert!(help.contains("/session - Show session info"));
         assert!(help.contains("/link <path> - Link to directory"));
         assert!(help.contains("/stream - Toggle streaming"));
-        assert!(help.contains("/disconnect - Disconnect session"));
+        assert!(help.contains("/close - Close topic and clean up"));
     }
 
     #[test]
@@ -112,7 +114,7 @@ mod tests {
         assert!(help.contains("/session - Show session info"));
         assert!(help.contains("/link <path> - Link to directory"));
         assert!(help.contains("/stream - Toggle streaming"));
-        assert!(help.contains("/disconnect - Disconnect session"));
+        assert!(help.contains("/close - Close topic and clean up"));
 
         // Verify reference to general help
         assert!(help.contains("Use /help in General topic for all commands."));
@@ -121,6 +123,7 @@ mod tests {
         assert!(!help.contains("/new"));
         assert!(!help.contains("/sessions"));
         assert!(!help.contains("/connect"));
+        assert!(!help.contains("/projects"));
         assert!(!help.contains("/status"));
         assert!(!help.contains("/clear"));
     }

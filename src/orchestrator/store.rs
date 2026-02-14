@@ -197,9 +197,13 @@ impl OrchestratorStore {
     }
 
     fn row_to_instance(&self, row: sqlx::sqlite::SqliteRow) -> Result<InstanceInfo> {
+        use sqlx::Column;
+
         let state_str: String = row.get("state");
         let type_str: String = row.get("instance_type");
         let port: i64 = row.get("port");
+
+        let has_container_id = row.columns().iter().any(|c| c.name() == "container_id");
 
         Ok(InstanceInfo {
             id: row.get("id"),
@@ -208,7 +212,11 @@ impl OrchestratorStore {
             state: serde_json::from_str(&state_str)?,
             instance_type: serde_json::from_str(&type_str)?,
             pid: None,
-            container_id: row.try_get("container_id").ok().flatten(),
+            container_id: if has_container_id {
+                row.try_get("container_id").ok().flatten()
+            } else {
+                None
+            },
             started_at: None,
             stopped_at: None,
         })
@@ -525,7 +533,7 @@ mod tests {
 
         let mut handles = vec![];
         for i in 0..10 {
-            let store_clone = OrchestratorStore::new(&db_path).await.unwrap();
+            let store_clone = store.clone();
             let handle = tokio::spawn(async move {
                 let instance = create_test_instance(
                     &format!("test-{}", i),

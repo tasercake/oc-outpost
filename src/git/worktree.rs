@@ -259,7 +259,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_worktree_no_commits_fails() {
+    async fn test_create_worktree_on_empty_repo() {
         let dir = TempDir::new().unwrap();
         Command::new("git")
             .args(["init"])
@@ -270,7 +270,8 @@ mod tests {
 
         let base_dir = TempDir::new().unwrap();
         let result = create_worktree(dir.path(), "test", base_dir.path()).await;
-        assert!(result.is_err());
+        // Modern git (2.50+) infers --orphan and succeeds on empty repos
+        assert!(result.is_ok());
     }
 
     #[tokio::test]

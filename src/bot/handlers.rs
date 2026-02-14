@@ -5,9 +5,10 @@ use std::sync::Arc;
 #[allow(unused_imports)]
 use teloxide::prelude::*;
 
+pub mod callbacks;
 pub mod clear;
+pub mod close;
 pub mod connect;
-pub mod disconnect;
 pub mod help;
 pub mod link;
 pub mod new;
@@ -19,11 +20,13 @@ pub mod status;
 pub mod stream;
 
 #[allow(unused_imports)]
+pub use callbacks::dispatch_callback;
+#[allow(unused_imports)]
 pub use clear::handle_clear;
 #[allow(unused_imports)]
-pub use connect::handle_connect;
+pub use close::handle_close;
 #[allow(unused_imports)]
-pub use disconnect::handle_disconnect;
+pub use connect::handle_connect;
 #[allow(unused_imports)]
 pub use help::handle_help;
 #[allow(unused_imports)]
@@ -52,7 +55,7 @@ mod tests {
         let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = new::handle_new;
         let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_sessions;
         let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_connect;
-        let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_disconnect;
+        let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_close;
         let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_link;
         let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_stream;
         let _: fn(Bot, Message, Command, Arc<BotState>) -> _ = handle_session;

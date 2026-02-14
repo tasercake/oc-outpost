@@ -12,8 +12,8 @@ mod types;
 
 use anyhow::Result;
 use bot::{
-    handle_clear, handle_connect, handle_disconnect, handle_help, handle_link, handle_new,
-    handle_permission_callback, handle_session, handle_sessions, handle_status, handle_stream,
+    dispatch_callback, handle_clear, handle_close, handle_connect, handle_help, handle_link,
+    handle_new, handle_projects, handle_session, handle_sessions, handle_status, handle_stream,
 };
 use bot::{BotState, Command};
 use config::Config;
@@ -25,6 +25,7 @@ use forum::TopicStore;
 use integration::Integration;
 use opencode::stream_handler::StreamHandler;
 use opencode::OpenCodeClient;
+use orchestrator::container::DockerRuntime;
 use orchestrator::manager::InstanceManager;
 use orchestrator::port_pool::PortPool;
 use orchestrator::store::OrchestratorStore;
@@ -131,8 +132,14 @@ async fn main() -> Result<()> {
         size = config.opencode_port_pool_size,
         "Port pool created"
     );
-    let instance_manager =
-        InstanceManager::new(Arc::new(config.clone()), store_for_manager, port_pool).await?;
+    let runtime = Arc::new(DockerRuntime::new()?);
+    let instance_manager = InstanceManager::new(
+        Arc::new(config.clone()),
+        store_for_manager,
+        port_pool,
+        runtime,
+    )
+    .await?;
     debug!("Instance manager created");
 
     info!("Recovering instances from database...");
@@ -247,7 +254,7 @@ async fn main() -> Result<()> {
                         }
                     }
                 }))
-                .branch(case![Command::Disconnect].endpoint({
+                .branch(case![Command::Projects].endpoint({
                     let state = Arc::clone(&bot_state);
                     move |bot: Bot, msg: Message, cmd: Command| {
                         let state = Arc::clone(&state);
@@ -257,9 +264,33 @@ async fn main() -> Result<()> {
                             let sender_id = msg.from.as_ref().map(|u| u.id.0);
                             let sender_username =
                                 msg.from.as_ref().and_then(|u| u.username.clone());
-                            if let Err(e) = handle_disconnect(bot, msg, cmd, state).await {
+                            if let Err(e) = handle_projects(bot, msg, cmd, state).await {
                                 log_command_error(
-                                    "/disconnect",
+                                    "/projects",
+                                    &e,
+                                    chat_id,
+                                    topic_id,
+                                    sender_id,
+                                    sender_username.as_deref(),
+                                );
+                            }
+                            respond(())
+                        }
+                    }
+                }))
+                .branch(case![Command::Close].endpoint({
+                    let state = Arc::clone(&bot_state);
+                    move |bot: Bot, msg: Message, cmd: Command| {
+                        let state = Arc::clone(&state);
+                        async move {
+                            let chat_id = msg.chat.id.0;
+                            let topic_id = msg.thread_id.map(|t| t.0 .0);
+                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
+                            let sender_username =
+                                msg.from.as_ref().and_then(|u| u.username.clone());
+                            if let Err(e) = handle_close(bot, msg, cmd, state).await {
+                                log_command_error(
+                                    "/close",
                                     &e,
                                     chat_id,
                                     topic_id,
@@ -458,7 +489,7 @@ async fn main() -> Result<()> {
                 async move {
                     let sender_id = q.from.id.0;
                     let sender_username = q.from.username.clone();
-                    if let Err(e) = handle_permission_callback(bot, q, state).await {
+                    if let Err(e) = dispatch_callback(bot, q, state).await {
                         error!(
                             sender_id = sender_id,
                             sender_username = ?sender_username,

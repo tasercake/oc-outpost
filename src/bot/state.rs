@@ -35,6 +35,7 @@ impl BotState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::orchestrator::container::{mock::MockRuntime, ContainerRuntime};
     use crate::orchestrator::manager::InstanceManager;
     use crate::orchestrator::port_pool::PortPool;
     use std::path::PathBuf;
@@ -62,6 +63,10 @@ mod tests {
             auto_create_project_dirs: true,
             api_port: 4200,
             api_key: None,
+            docker_image: "ghcr.io/sst/opencode".to_string(),
+            opencode_config_path: PathBuf::from("/tmp/oc-config"),
+            container_port: 8080,
+            env_passthrough: vec![],
         };
         (config, temp_dir)
     }
@@ -77,10 +82,15 @@ mod tests {
 
         let store_for_manager = orchestrator_store.clone();
         let port_pool = PortPool::new(4100, 10);
-        let instance_manager =
-            InstanceManager::new(Arc::new(config.clone()), store_for_manager, port_pool)
-                .await
-                .unwrap();
+        let runtime: Arc<dyn ContainerRuntime> = Arc::new(MockRuntime::new());
+        let instance_manager = InstanceManager::new(
+            Arc::new(config.clone()),
+            store_for_manager,
+            port_pool,
+            runtime,
+        )
+        .await
+        .unwrap();
         let bot_start_time = Instant::now();
 
         let state = BotState::new(
@@ -106,10 +116,15 @@ mod tests {
 
         let store_for_manager = orchestrator_store.clone();
         let port_pool = PortPool::new(4100, 10);
-        let instance_manager =
-            InstanceManager::new(Arc::new(config.clone()), store_for_manager, port_pool)
-                .await
-                .unwrap();
+        let runtime: Arc<dyn ContainerRuntime> = Arc::new(MockRuntime::new());
+        let instance_manager = InstanceManager::new(
+            Arc::new(config.clone()),
+            store_for_manager,
+            port_pool,
+            runtime,
+        )
+        .await
+        .unwrap();
         let bot_start_time = Instant::now();
 
         let state = BotState::new(
@@ -135,10 +150,15 @@ mod tests {
 
         let store_for_manager = orchestrator_store.clone();
         let port_pool = PortPool::new(4100, 10);
-        let instance_manager =
-            InstanceManager::new(Arc::new(config.clone()), store_for_manager, port_pool)
-                .await
-                .unwrap();
+        let runtime: Arc<dyn ContainerRuntime> = Arc::new(MockRuntime::new());
+        let instance_manager = InstanceManager::new(
+            Arc::new(config.clone()),
+            store_for_manager,
+            port_pool,
+            runtime,
+        )
+        .await
+        .unwrap();
         let bot_start_time = Instant::now();
 
         let state = BotState::new(

@@ -208,6 +208,7 @@ mod tests {
             project_path: "/home/user/my-project".to_string(),
             port: 4101,
             pid: Some(12345),
+            container_id: None,
             started_at: Some(1640000000),
             stopped_at: None,
         };
@@ -271,6 +272,7 @@ mod tests {
             project_path: "/another/path".to_string(),
             port: 4102,
             pid: None,
+            container_id: None,
             started_at: None,
             stopped_at: Some(1650000200),
         };
@@ -324,6 +326,7 @@ mod tests {
             project_path: "/external/project".to_string(),
             port: 4103,
             pid: None,
+            container_id: None,
             started_at: None,
             stopped_at: None,
         };

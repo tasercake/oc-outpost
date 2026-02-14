@@ -3,11 +3,12 @@
 //! This module provides the `OpenCodeInstance` struct for managing the lifecycle
 //! of OpenCode processes, including spawning, health checks, and graceful shutdown.
 
+use crate::orchestrator::container::{ContainerConfig, ContainerRuntime, ContainerState};
 use crate::types::instance::{InstanceConfig, InstanceState};
 use anyhow::{anyhow, Result};
+use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tracing::debug;
 
@@ -19,21 +20,18 @@ const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Manages the lifecycle of a single OpenCode instance.
 ///
-/// Handles process spawning, health checks, and graceful shutdown.
+/// Handles container spawning, health checks, and graceful shutdown.
 /// State transitions are tracked and can be queried.
-#[derive(Debug)]
 pub struct OpenCodeInstance {
     id: String,
     config: InstanceConfig,
     port: u16,
     state: Arc<Mutex<InstanceState>>,
-    child: Arc<Mutex<Option<Child>>>,
+    runtime: Option<Arc<dyn ContainerRuntime>>,
+    container_id: Arc<Mutex<Option<String>>>,
     #[allow(dead_code)]
     // Used by future: session tracking feature
     session_id: Arc<Mutex<Option<String>>>,
-    #[allow(dead_code)]
-    // Used by future: process monitoring feature
-    pid: Arc<Mutex<Option<u32>>>,
     http_client: reqwest::Client,
 }
 
@@ -45,12 +43,18 @@ impl OpenCodeInstance {
     ///
     /// # Arguments
     /// * `config` - Instance configuration including project path
-    /// * `port` - Port number for the instance to listen on
+    /// * `runtime` - Container runtime implementation
+    /// * `container_config` - Container configuration
     ///
     /// # Returns
     /// * `Ok(Self)` - Instance spawned successfully
     /// * `Err(_)` - Failed to spawn process
-    pub async fn spawn(config: InstanceConfig, port: u16) -> Result<Self> {
+    pub async fn spawn(
+        config: InstanceConfig,
+        port: u16,
+        runtime: Arc<dyn ContainerRuntime>,
+        container_config: ContainerConfig,
+    ) -> Result<(Self, String)> {
         debug!(
             instance_id = %config.id,
             project_path = %config.project_path,
@@ -59,42 +63,36 @@ impl OpenCodeInstance {
         );
 
         let state = Arc::new(Mutex::new(InstanceState::Starting));
-        let child_holder = Arc::new(Mutex::new(None::<Child>));
+        let container_id_holder = Arc::new(Mutex::new(None::<String>));
         let session_id = Arc::new(Mutex::new(None::<String>));
-        let pid_holder = Arc::new(Mutex::new(None::<u32>));
 
-        let mut cmd = Command::new(&config.opencode_path);
-        cmd.arg("serve")
-            .arg("--port")
-            .arg(port.to_string())
-            .current_dir(&config.project_path)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true);
-
-        let child = cmd.spawn().map_err(|e| {
+        let container_id = runtime
+            .create_container(&container_config)
+            .await
+            .map_err(|e| {
+                anyhow!(
+                    "Failed to create container for project '{}': {}",
+                    config.project_path,
+                    e
+                )
+            })?;
+        runtime.start_container(&container_id).await.map_err(|e| {
             anyhow!(
-                "Failed to spawn OpenCode instance for project '{}': {}",
+                "Failed to start container for project '{}': {}",
                 config.project_path,
                 e
             )
         })?;
 
-        let child_pid = child.id();
         debug!(
             instance_id = %config.id,
-            pid = ?child_pid,
-            "OpenCode process spawned successfully"
+            container_id = %container_id,
+            "OpenCode container started successfully"
         );
 
         {
-            let mut pid_guard = pid_holder.lock().await;
-            *pid_guard = child_pid;
-        }
-
-        {
-            let mut child_guard = child_holder.lock().await;
-            *child_guard = Some(child);
+            let mut container_guard = container_id_holder.lock().await;
+            *container_guard = Some(container_id.clone());
         }
 
         {
@@ -107,16 +105,19 @@ impl OpenCodeInstance {
             .build()
             .map_err(|e| anyhow!("Failed to create HTTP client: {}", e))?;
 
-        Ok(Self {
-            id: config.id.clone(),
-            config,
-            port,
-            state,
-            child: child_holder,
-            session_id,
-            pid: pid_holder,
-            http_client,
-        })
+        Ok((
+            Self {
+                id: config.id.clone(),
+                config,
+                port,
+                state,
+                runtime: Some(runtime),
+                container_id: container_id_holder,
+                session_id,
+                http_client,
+            },
+            container_id,
+        ))
     }
 
     /// Create an instance for an external process (not spawned by us).
@@ -145,9 +146,9 @@ impl OpenCodeInstance {
             config,
             port,
             state: Arc::new(Mutex::new(InstanceState::Running)),
-            child: Arc::new(Mutex::new(None)),
+            runtime: None,
+            container_id: Arc::new(Mutex::new(None)),
             session_id: Arc::new(Mutex::new(None)),
-            pid: Arc::new(Mutex::new(pid)),
             http_client,
         })
     }
@@ -211,65 +212,15 @@ impl OpenCodeInstance {
             *state_guard = InstanceState::Stopping;
         }
 
-        let mut child_guard = self.child.lock().await;
+        let runtime = self.runtime.as_ref().map(Arc::clone);
+        let container_id = { self.container_id.lock().await.clone() };
 
-        if let Some(ref mut child) = *child_guard {
-            let pid = child.id();
-
-            #[cfg(unix)]
-            {
-                if let Some(pid) = pid {
-                    use std::process::Command as StdCommand;
-
-                    debug!(instance_id = %self.id, pid = pid, "Sending SIGTERM");
-                    let _ = StdCommand::new("kill")
-                        .arg("-TERM")
-                        .arg(pid.to_string())
-                        .output();
-
-                    let graceful_exit = tokio::time::timeout(GRACEFUL_SHUTDOWN_TIMEOUT, async {
-                        loop {
-                            match child.try_wait() {
-                                Ok(Some(_)) => return true,
-                                Ok(None) => {
-                                    tokio::time::sleep(Duration::from_millis(100)).await;
-                                }
-                                Err(_) => return false,
-                            }
-                        }
-                    })
-                    .await;
-
-                    if graceful_exit.is_err() || !graceful_exit.unwrap() {
-                        debug!(
-                            instance_id = %self.id,
-                            pid = pid,
-                            "Graceful shutdown timeout, sending SIGKILL"
-                        );
-                        let _ = child.kill().await;
-                    } else {
-                        debug!(
-                            instance_id = %self.id,
-                            pid = pid,
-                            "Process exited gracefully"
-                        );
-                    }
-                } else {
-                    debug!(instance_id = %self.id, "No PID available, killing process");
-                    let _ = child.kill().await;
-                }
-            }
-
-            #[cfg(not(unix))]
-            {
-                debug!(instance_id = %self.id, "Killing process (non-Unix)");
-                let _ = child.kill().await;
-            }
-
-            let _ = child.wait().await;
+        if let (Some(runtime), Some(container_id)) = (runtime, container_id) {
+            runtime
+                .stop_container(&container_id, GRACEFUL_SHUTDOWN_TIMEOUT.as_secs())
+                .await?;
+            runtime.remove_container(&container_id, true).await?;
         }
-
-        *child_guard = None;
 
         {
             let mut state_guard = self.state.lock().await;
@@ -277,8 +228,8 @@ impl OpenCodeInstance {
         }
 
         {
-            let mut pid_guard = self.pid.lock().await;
-            *pid_guard = None;
+            let mut container_guard = self.container_id.lock().await;
+            *container_guard = None;
         }
 
         debug!(instance_id = %self.id, "Instance stopped");
@@ -322,14 +273,6 @@ impl OpenCodeInstance {
         *guard = session_id;
     }
 
-    /// Get the process ID if available.
-    #[allow(dead_code)]
-    // Used by future: process monitoring feature
-    pub async fn pid(&self) -> Option<u32> {
-        let guard = self.pid.lock().await;
-        *guard
-    }
-
     /// Set the state (for external state updates like crash detection).
     #[allow(dead_code)]
     // Used by future: state management feature
@@ -338,49 +281,59 @@ impl OpenCodeInstance {
         *guard = new_state;
     }
 
+    /// Get the container ID if available.
+    pub async fn container_id(&self) -> Option<String> {
+        let guard = self.container_id.lock().await;
+        guard.clone()
+    }
+
     /// Check if the process has crashed (exited unexpectedly).
     ///
     /// Returns true if the process was running but has now exited.
     /// Updates state to Error if crash detected.
     pub async fn check_for_crash(&self) -> Result<bool> {
-        let mut child_guard = self.child.lock().await;
+        let runtime = self.runtime.as_ref().map(Arc::clone);
+        let container_id = { self.container_id.lock().await.clone() };
 
-        if let Some(ref mut child) = *child_guard {
-            match child.try_wait() {
-                Ok(Some(status)) => {
-                    if !status.success() {
-                        debug!(
-                            instance_id = %self.id,
-                            exit_status = ?status,
-                            "Process crashed detected"
-                        );
-                        let mut state_guard = self.state.lock().await;
-                        *state_guard = InstanceState::Error;
-                        drop(child_guard);
-
-                        let mut pid_guard = self.pid.lock().await;
-                        *pid_guard = None;
-
-                        return Ok(true);
-                    } else {
-                        debug!(
-                            instance_id = %self.id,
-                            "Process exited cleanly"
-                        );
-                        let mut state_guard = self.state.lock().await;
-                        *state_guard = InstanceState::Stopped;
-                    }
-                    Ok(false)
-                }
-                Ok(None) => {
-                    debug!(instance_id = %self.id, "Process still running");
-                    Ok(false)
-                }
-                Err(e) => Err(anyhow!("Failed to check process status: {}", e)),
+        let (runtime, container_id) = match (runtime, container_id) {
+            (Some(runtime), Some(container_id)) => (runtime, container_id),
+            _ => {
+                debug!(instance_id = %self.id, "No container to check");
+                return Ok(false);
             }
-        } else {
-            debug!(instance_id = %self.id, "No child process to check");
-            Ok(false)
+        };
+
+        let info = runtime.inspect_container(&container_id).await?;
+        match info.state {
+            ContainerState::Running => {
+                debug!(instance_id = %self.id, "Container still running");
+                Ok(false)
+            }
+            ContainerState::Exited(code) => {
+                let mut state_guard = self.state.lock().await;
+                if code == 0 {
+                    debug!(
+                        instance_id = %self.id,
+                        exit_code = code,
+                        "Container exited cleanly"
+                    );
+                    *state_guard = InstanceState::Stopped;
+                } else {
+                    debug!(
+                        instance_id = %self.id,
+                        exit_code = code,
+                        "Container crash detected"
+                    );
+                    *state_guard = InstanceState::Error;
+                }
+                drop(state_guard);
+
+                let mut container_guard = self.container_id.lock().await;
+                *container_guard = None;
+
+                Ok(code != 0)
+            }
+            ContainerState::Created | ContainerState::Unknown(_) => Ok(false),
         }
     }
 
@@ -437,9 +390,24 @@ impl OpenCodeInstance {
     }
 }
 
+impl fmt::Debug for OpenCodeInstance {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OpenCodeInstance")
+            .field("id", &self.id)
+            .field("config", &self.config)
+            .field("port", &self.port)
+            .field("state", &"Mutex<InstanceState>")
+            .field("container_id", &"Mutex<Option<String>>")
+            .field("session_id", &"Mutex<Option<String>>")
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::orchestrator::container::mock::{MockAction, MockRuntime};
+    use crate::orchestrator::container::{ContainerConfig, ContainerInfo, ContainerState};
     use crate::types::instance::InstanceType;
 
     /// Helper to create a test InstanceConfig
@@ -451,6 +419,18 @@ mod tests {
             port: 0,
             auto_start: true,
             opencode_path: "opencode".to_string(),
+        }
+    }
+
+    fn test_container_config(instance_id: &str, host_port: u16) -> ContainerConfig {
+        ContainerConfig {
+            instance_id: instance_id.to_string(),
+            image: "ghcr.io/sst/opencode".to_string(),
+            host_port,
+            container_port: 8080,
+            worktree_path: "/tmp/project".to_string(),
+            config_mount_path: "/tmp/config".to_string(),
+            env_vars: vec![],
         }
     }
 
@@ -475,19 +455,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_external_instance_pid() {
+    async fn test_external_instance_container_id_none() {
         let config = test_config("test-3", "/tmp/project");
         let instance = OpenCodeInstance::external(config, 4102, Some(99999)).unwrap();
 
-        assert_eq!(instance.pid().await, Some(99999));
-    }
-
-    #[tokio::test]
-    async fn test_external_instance_pid_none() {
-        let config = test_config("test-4", "/tmp/project");
-        let instance = OpenCodeInstance::external(config, 4103, None).unwrap();
-
-        assert_eq!(instance.pid().await, None);
+        assert_eq!(instance.container_id().await, None);
     }
 
     // ==================== Port Getter Tests ====================
@@ -594,21 +566,134 @@ mod tests {
     // ==================== Spawn Tests ====================
 
     #[tokio::test]
-    async fn test_spawn_fails_with_invalid_command() {
-        let config = InstanceConfig {
-            id: "fail-test".to_string(),
-            instance_type: InstanceType::Managed,
-            project_path: "/tmp/test".to_string(),
-            port: 4300,
-            auto_start: true,
-            opencode_path: "/nonexistent/opencode-test-binary".to_string(),
-        };
+    async fn test_spawn_with_mock_runtime() {
+        let mut config = test_config("spawn-test", "/tmp/project");
+        config.port = 4300;
+        let container_config = test_container_config("spawn-test", 4300);
+        let runtime = Arc::new(MockRuntime::new());
+        let runtime_arc: Arc<dyn ContainerRuntime> = runtime.clone();
 
-        let result = OpenCodeInstance::spawn(config, 4300).await;
+        let (instance, container_id) =
+            OpenCodeInstance::spawn(config, 4300, runtime_arc, container_config)
+                .await
+                .unwrap();
 
-        if let Err(err) = result {
-            assert!(err.to_string().contains("Failed to spawn"));
-        }
+        assert_eq!(instance.state().await, InstanceState::Running);
+        assert_eq!(
+            instance.container_id().await,
+            Some("mock-container-id-abc123".to_string())
+        );
+        assert_eq!(container_id, "mock-container-id-abc123".to_string());
+
+        let actions = runtime.recorded_actions();
+        assert!(matches!(actions[0], MockAction::CreateContainer { .. }));
+        assert!(matches!(actions[1], MockAction::StartContainer { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_stop_with_mock_runtime() {
+        let mut config = test_config("stop-test", "/tmp/project");
+        config.port = 4301;
+        let container_config = test_container_config("stop-test", 4301);
+        let runtime = Arc::new(MockRuntime::new());
+        let runtime_arc: Arc<dyn ContainerRuntime> = runtime.clone();
+
+        let (instance, _) = OpenCodeInstance::spawn(config, 4301, runtime_arc, container_config)
+            .await
+            .unwrap();
+
+        instance.stop().await.unwrap();
+
+        assert_eq!(instance.state().await, InstanceState::Stopped);
+        assert_eq!(instance.container_id().await, None);
+
+        let actions = runtime.recorded_actions();
+        assert!(matches!(actions[2], MockAction::StopContainer { .. }));
+        assert!(matches!(actions[3], MockAction::RemoveContainer { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_crash_detection_running() {
+        let mut config = test_config("running-test", "/tmp/project");
+        config.port = 4302;
+        let container_config = test_container_config("running-test", 4302);
+        let runtime = Arc::new(MockRuntime::new().with_inspect_result(Ok(ContainerInfo {
+            id: "mock-container-id-abc123".to_string(),
+            name: "oc-running-test".to_string(),
+            state: ContainerState::Running,
+        })));
+        let runtime_arc: Arc<dyn ContainerRuntime> = runtime.clone();
+
+        let (instance, _) = OpenCodeInstance::spawn(config, 4302, runtime_arc, container_config)
+            .await
+            .unwrap();
+
+        let crashed = instance.check_for_crash().await.unwrap();
+        assert!(!crashed);
+        assert_eq!(instance.state().await, InstanceState::Running);
+    }
+
+    #[tokio::test]
+    async fn test_crash_detection_exited_nonzero() {
+        let mut config = test_config("crash-test", "/tmp/project");
+        config.port = 4303;
+        let container_config = test_container_config("crash-test", 4303);
+        let runtime = Arc::new(MockRuntime::new().with_inspect_result(Ok(ContainerInfo {
+            id: "mock-container-id-abc123".to_string(),
+            name: "oc-crash-test".to_string(),
+            state: ContainerState::Exited(1),
+        })));
+        let runtime_arc: Arc<dyn ContainerRuntime> = runtime.clone();
+
+        let (instance, _) = OpenCodeInstance::spawn(config, 4303, runtime_arc, container_config)
+            .await
+            .unwrap();
+
+        let crashed = instance.check_for_crash().await.unwrap();
+        assert!(crashed);
+        assert_eq!(instance.state().await, InstanceState::Error);
+        assert_eq!(instance.container_id().await, None);
+    }
+
+    #[tokio::test]
+    async fn test_crash_detection_exited_zero() {
+        let mut config = test_config("exit-zero-test", "/tmp/project");
+        config.port = 4304;
+        let container_config = test_container_config("exit-zero-test", 4304);
+        let runtime = Arc::new(MockRuntime::new().with_inspect_result(Ok(ContainerInfo {
+            id: "mock-container-id-abc123".to_string(),
+            name: "oc-exit-zero-test".to_string(),
+            state: ContainerState::Exited(0),
+        })));
+        let runtime_arc: Arc<dyn ContainerRuntime> = runtime.clone();
+
+        let (instance, _) = OpenCodeInstance::spawn(config, 4304, runtime_arc, container_config)
+            .await
+            .unwrap();
+
+        let crashed = instance.check_for_crash().await.unwrap();
+        assert!(!crashed);
+        assert_eq!(instance.state().await, InstanceState::Stopped);
+        assert_eq!(instance.container_id().await, None);
+    }
+
+    #[tokio::test]
+    async fn test_spawn_failure_propagates_error() {
+        let mut config = test_config("fail-test", "/tmp/project");
+        config.port = 4305;
+        let container_config = test_container_config("fail-test", 4305);
+        let runtime =
+            Arc::new(MockRuntime::new().with_create_result(Err("image not found".to_string())));
+        let runtime_arc: Arc<dyn ContainerRuntime> = runtime.clone();
+
+        let result = OpenCodeInstance::spawn(config, 4305, runtime_arc, container_config).await;
+
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Failed to create container"));
+
+        let actions = runtime.recorded_actions();
+        assert!(matches!(actions[0], MockAction::CreateContainer { .. }));
+        assert_eq!(actions.len(), 1);
     }
 
     // ==================== Wait for Ready Tests ====================
@@ -644,150 +729,5 @@ mod tests {
 
         assert_ne!(instance1.id(), instance2.id());
         assert_ne!(instance2.id(), instance3.id());
-    }
-
-    // ==================== Process Lifecycle Integration Tests ====================
-
-    #[tokio::test]
-    #[cfg(unix)]
-    async fn test_spawn_real_process_and_stop() {
-        let config = test_config("sleep-test", "/tmp");
-        let state = Arc::new(Mutex::new(InstanceState::Starting));
-        let child_holder = Arc::new(Mutex::new(None::<Child>));
-        let pid_holder = Arc::new(Mutex::new(None::<u32>));
-
-        let mut cmd = Command::new("sleep");
-        cmd.arg("60").kill_on_drop(true);
-
-        let child = cmd.spawn().expect("Failed to spawn sleep process");
-        let child_pid = child.id();
-
-        {
-            let mut pid_guard = pid_holder.lock().await;
-            *pid_guard = child_pid;
-        }
-
-        {
-            let mut child_guard = child_holder.lock().await;
-            *child_guard = Some(child);
-        }
-
-        {
-            let mut state_guard = state.lock().await;
-            *state_guard = InstanceState::Running;
-        }
-
-        let http_client = reqwest::Client::new();
-
-        let instance = OpenCodeInstance {
-            id: config.id.clone(),
-            config,
-            port: 0,
-            state,
-            child: child_holder,
-            session_id: Arc::new(Mutex::new(None)),
-            pid: pid_holder,
-            http_client,
-        };
-
-        assert_eq!(instance.state().await, InstanceState::Running);
-        assert!(instance.pid().await.is_some());
-
-        instance.stop().await.expect("Failed to stop instance");
-
-        assert_eq!(instance.state().await, InstanceState::Stopped);
-        assert_eq!(instance.pid().await, None);
-    }
-
-    #[tokio::test]
-    #[cfg(unix)]
-    async fn test_graceful_shutdown_sends_sigterm() {
-        let config = test_config("sigterm-test", "/tmp");
-        let state = Arc::new(Mutex::new(InstanceState::Running));
-        let child_holder = Arc::new(Mutex::new(None::<Child>));
-        let pid_holder = Arc::new(Mutex::new(None::<u32>));
-
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c")
-            .arg("trap 'exit 0' TERM; sleep 60")
-            .kill_on_drop(true);
-
-        let child = cmd.spawn().expect("Failed to spawn sh process");
-        let child_pid = child.id();
-
-        {
-            let mut pid_guard = pid_holder.lock().await;
-            *pid_guard = child_pid;
-        }
-
-        {
-            let mut child_guard = child_holder.lock().await;
-            *child_guard = Some(child);
-        }
-
-        let http_client = reqwest::Client::new();
-
-        let instance = OpenCodeInstance {
-            id: config.id.clone(),
-            config,
-            port: 0,
-            state,
-            child: child_holder,
-            session_id: Arc::new(Mutex::new(None)),
-            pid: pid_holder,
-            http_client,
-        };
-
-        let start = std::time::Instant::now();
-        instance.stop().await.expect("Failed to stop instance");
-        let elapsed = start.elapsed();
-
-        assert!(elapsed < GRACEFUL_SHUTDOWN_TIMEOUT + Duration::from_secs(1));
-        assert_eq!(instance.state().await, InstanceState::Stopped);
-    }
-
-    #[tokio::test]
-    #[cfg(unix)]
-    async fn test_crash_detection_with_real_process() {
-        let config = test_config("crash-test", "/tmp");
-        let state = Arc::new(Mutex::new(InstanceState::Running));
-        let child_holder = Arc::new(Mutex::new(None::<Child>));
-        let pid_holder = Arc::new(Mutex::new(None::<u32>));
-
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c").arg("exit 1").kill_on_drop(true);
-
-        let child = cmd.spawn().expect("Failed to spawn sh process");
-        let child_pid = child.id();
-
-        {
-            let mut pid_guard = pid_holder.lock().await;
-            *pid_guard = child_pid;
-        }
-
-        {
-            let mut child_guard = child_holder.lock().await;
-            *child_guard = Some(child);
-        }
-
-        let http_client = reqwest::Client::new();
-
-        let instance = OpenCodeInstance {
-            id: config.id.clone(),
-            config,
-            port: 0,
-            state,
-            child: child_holder,
-            session_id: Arc::new(Mutex::new(None)),
-            pid: pid_holder,
-            http_client,
-        };
-
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        let crashed = instance.check_for_crash().await.unwrap();
-        assert!(crashed);
-
-        assert_eq!(instance.state().await, InstanceState::Error);
     }
 }

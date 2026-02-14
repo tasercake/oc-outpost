@@ -19,9 +19,13 @@ pub enum Command {
     #[command(description = "connect to existing session - Usage: /connect <session_id>")]
     Connect(String),
 
-    /// Disconnect and delete topic
-    #[command(description = "disconnect and delete topic")]
-    Disconnect,
+    /// List available projects
+    #[command(description = "list available projects")]
+    Projects,
+
+    /// Close topic and clean up
+    #[command(description = "close topic and clean up")]
+    Close,
 
     /// Link topic to directory
     #[command(description = "link topic to directory - Usage: /link <directory>")]
@@ -71,9 +75,21 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_disconnect_command() {
-        let cmd = Command::parse("/disconnect", "bot").unwrap();
-        assert_eq!(cmd, Command::Disconnect);
+    fn test_parse_close_command() {
+        let cmd = Command::parse("/close", "bot").unwrap();
+        assert_eq!(cmd, Command::Close);
+    }
+
+    #[test]
+    fn test_parse_projects_command() {
+        let cmd = Command::parse("/projects", "bot").unwrap();
+        assert_eq!(cmd, Command::Projects);
+    }
+
+    #[test]
+    fn test_disconnect_removed() {
+        let result = Command::parse("/disconnect", "bot");
+        assert!(result.is_err());
     }
 
     #[test]
@@ -118,6 +134,10 @@ mod tests {
         assert!(descriptions.to_string().contains("create new project"));
         assert!(descriptions.to_string().contains("list all sessions"));
         assert!(descriptions.to_string().contains("toggle streaming"));
+        assert!(descriptions.to_string().contains("list available projects"));
+        assert!(descriptions
+            .to_string()
+            .contains("close topic and clean up"));
     }
 
     #[test]
