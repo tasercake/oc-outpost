@@ -1,34 +1,22 @@
-mod api;
-mod bot;
-mod config;
-mod db;
-mod forum;
-mod git;
-mod integration;
-mod opencode;
-mod orchestrator;
-mod telegram;
-mod types;
-
 use anyhow::Result;
-use bot::{
-    dispatch_callback, handle_clear, handle_close, handle_connect, handle_help, handle_link,
-    handle_new, handle_projects, handle_session, handle_sessions, handle_status, handle_stream,
-};
-use bot::{BotState, Command};
-use config::Config;
-use db::log_store::LogStore;
-use db::tracing_layer::DatabaseLayer;
 use dptree::case;
-
-use forum::TopicStore;
-use integration::Integration;
-use opencode::stream_handler::StreamHandler;
-use opencode::OpenCodeClient;
-use orchestrator::container::DockerRuntime;
-use orchestrator::manager::InstanceManager;
-use orchestrator::port_pool::PortPool;
-use orchestrator::store::OrchestratorStore;
+use oc_outpost::bot::{
+    dispatch_callback, handle_close, handle_help, handle_new, handle_projects, handle_session,
+    handle_sessions, handle_status,
+};
+use oc_outpost::bot::{BotState, Command};
+use oc_outpost::config::Config;
+use oc_outpost::db::log_store::LogStore;
+use oc_outpost::db::tracing_layer::DatabaseLayer;
+use oc_outpost::forum::TopicStore;
+use oc_outpost::integration::Integration;
+use oc_outpost::opencode::stream_handler::StreamHandler;
+use oc_outpost::opencode::OpenCodeClient;
+use oc_outpost::orchestrator::container::DockerRuntime;
+use oc_outpost::orchestrator::manager::InstanceManager;
+use oc_outpost::orchestrator::port_pool::PortPool;
+use oc_outpost::orchestrator::store::OrchestratorStore;
+use oc_outpost::types::error::OutpostError;
 use std::sync::Arc;
 use std::time::Instant;
 use teloxide::prelude::*;
@@ -36,7 +24,6 @@ use tokio::signal;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use types::error::OutpostError;
 
 fn log_command_error(
     command: &str,
@@ -84,7 +71,6 @@ async fn main() -> Result<()> {
         "max_instances": config.opencode_max_instances,
         "port_start": config.opencode_port_start,
         "port_pool_size": config.opencode_port_pool_size,
-        "api_port": config.api_port,
     });
     log_store
         .create_run(&run_id, version, Some(&config_summary.to_string()))
@@ -119,11 +105,6 @@ async fn main() -> Result<()> {
     debug!(db_path = %config.orchestrator_db_path.display(), "Orchestrator store initialized");
     let topic_store = TopicStore::new(&config.topic_db_path).await?;
     debug!(db_path = %config.topic_db_path.display(), "Topic store initialized");
-
-    let api_state = api::AppState {
-        store: orchestrator_store.clone(),
-        api_key: config.api_key.clone(),
-    };
 
     let store_for_manager = orchestrator_store.clone();
     let port_pool = PortPool::new(config.opencode_port_start, config.opencode_port_pool_size);
@@ -163,17 +144,6 @@ async fn main() -> Result<()> {
         bot_start_time,
     ));
     debug!("Bot state initialized");
-    let api_router = api::create_router(api_state);
-    let api_addr = format!("127.0.0.1:{}", config.api_port);
-    let api_listener = tokio::net::TcpListener::bind(&api_addr).await?;
-    debug!(addr = %api_addr, "API TCP listener bound");
-    info!("API server listening on http://{}", api_addr);
-
-    let api_handle = tokio::spawn(async move {
-        if let Err(e) = axum::serve(api_listener, api_router).await {
-            error!("API server error: {}", e);
-        }
-    });
 
     let bot = Bot::new(&config.telegram_bot_token);
 
@@ -186,307 +156,219 @@ async fn main() -> Result<()> {
     let handler = dptree::entry()
         .branch(
             Update::filter_message()
-                .filter_command::<Command>()
-                .branch(case![Command::New(name)].endpoint({
-                    let state = Arc::clone(&bot_state);
-                    move |bot: Bot, msg: Message, cmd: Command| {
-                        let state = Arc::clone(&state);
-                        async move {
-                            let chat_id = msg.chat.id.0;
-                            let topic_id = msg.thread_id.map(|t| t.0 .0);
-                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
-                            let sender_username =
-                                msg.from.as_ref().and_then(|u| u.username.clone());
-                            if let Err(e) = handle_new(bot, msg, cmd, state).await {
-                                log_command_error(
-                                    "/new",
-                                    &e,
-                                    chat_id,
-                                    topic_id,
-                                    sender_id,
-                                    sender_username.as_deref(),
-                                );
+                .filter({
+                    let config = config.clone();
+                    move |msg: Message| config.is_whitelisted_chat(msg.chat.id.0)
+                })
+                .branch(
+                    dptree::entry()
+                        .filter_command::<Command>()
+                        .branch(case![Command::New(name)].endpoint({
+                            let state = Arc::clone(&bot_state);
+                            move |bot: Bot, msg: Message, cmd: Command| {
+                                let state = Arc::clone(&state);
+                                async move {
+                                    let chat_id = msg.chat.id.0;
+                                    let topic_id = msg.thread_id.map(|t| t.0 .0);
+                                    let sender_id = msg.from.as_ref().map(|u| u.id.0);
+                                    let sender_username =
+                                        msg.from.as_ref().and_then(|u| u.username.clone());
+                                    if let Err(e) = handle_new(bot, msg, cmd, state).await {
+                                        log_command_error(
+                                            "/new",
+                                            &e,
+                                            chat_id,
+                                            topic_id,
+                                            sender_id,
+                                            sender_username.as_deref(),
+                                        );
+                                    }
+                                    respond(())
+                                }
                             }
-                            respond(())
-                        }
-                    }
-                }))
-                .branch(case![Command::Sessions].endpoint({
-                    let state = Arc::clone(&bot_state);
-                    move |bot: Bot, msg: Message, cmd: Command| {
-                        let state = Arc::clone(&state);
-                        async move {
-                            let chat_id = msg.chat.id.0;
-                            let topic_id = msg.thread_id.map(|t| t.0 .0);
-                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
-                            let sender_username =
-                                msg.from.as_ref().and_then(|u| u.username.clone());
-                            if let Err(e) = handle_sessions(bot, msg, cmd, state).await {
-                                log_command_error(
-                                    "/sessions",
-                                    &e,
-                                    chat_id,
-                                    topic_id,
-                                    sender_id,
-                                    sender_username.as_deref(),
-                                );
+                        }))
+                        .branch(case![Command::Sessions].endpoint({
+                            let state = Arc::clone(&bot_state);
+                            move |bot: Bot, msg: Message, cmd: Command| {
+                                let state = Arc::clone(&state);
+                                async move {
+                                    let chat_id = msg.chat.id.0;
+                                    let topic_id = msg.thread_id.map(|t| t.0 .0);
+                                    let sender_id = msg.from.as_ref().map(|u| u.id.0);
+                                    let sender_username =
+                                        msg.from.as_ref().and_then(|u| u.username.clone());
+                                    if let Err(e) = handle_sessions(bot, msg, cmd, state).await {
+                                        log_command_error(
+                                            "/sessions",
+                                            &e,
+                                            chat_id,
+                                            topic_id,
+                                            sender_id,
+                                            sender_username.as_deref(),
+                                        );
+                                    }
+                                    respond(())
+                                }
                             }
-                            respond(())
-                        }
-                    }
-                }))
-                .branch(case![Command::Connect(id)].endpoint({
-                    let state = Arc::clone(&bot_state);
-                    move |bot: Bot, msg: Message, cmd: Command| {
-                        let state = Arc::clone(&state);
-                        async move {
-                            let chat_id = msg.chat.id.0;
-                            let topic_id = msg.thread_id.map(|t| t.0 .0);
-                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
-                            let sender_username =
-                                msg.from.as_ref().and_then(|u| u.username.clone());
-                            if let Err(e) = handle_connect(bot, msg, cmd, state).await {
-                                log_command_error(
-                                    "/connect",
-                                    &e,
-                                    chat_id,
-                                    topic_id,
-                                    sender_id,
-                                    sender_username.as_deref(),
-                                );
+                        }))
+                        .branch(case![Command::Projects].endpoint({
+                            let state = Arc::clone(&bot_state);
+                            move |bot: Bot, msg: Message, cmd: Command| {
+                                let state = Arc::clone(&state);
+                                async move {
+                                    let chat_id = msg.chat.id.0;
+                                    let topic_id = msg.thread_id.map(|t| t.0 .0);
+                                    let sender_id = msg.from.as_ref().map(|u| u.id.0);
+                                    let sender_username =
+                                        msg.from.as_ref().and_then(|u| u.username.clone());
+                                    if let Err(e) = handle_projects(bot, msg, cmd, state).await {
+                                        log_command_error(
+                                            "/projects",
+                                            &e,
+                                            chat_id,
+                                            topic_id,
+                                            sender_id,
+                                            sender_username.as_deref(),
+                                        );
+                                    }
+                                    respond(())
+                                }
                             }
-                            respond(())
-                        }
-                    }
-                }))
-                .branch(case![Command::Projects].endpoint({
-                    let state = Arc::clone(&bot_state);
-                    move |bot: Bot, msg: Message, cmd: Command| {
-                        let state = Arc::clone(&state);
-                        async move {
-                            let chat_id = msg.chat.id.0;
-                            let topic_id = msg.thread_id.map(|t| t.0 .0);
-                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
-                            let sender_username =
-                                msg.from.as_ref().and_then(|u| u.username.clone());
-                            if let Err(e) = handle_projects(bot, msg, cmd, state).await {
-                                log_command_error(
-                                    "/projects",
-                                    &e,
-                                    chat_id,
-                                    topic_id,
-                                    sender_id,
-                                    sender_username.as_deref(),
-                                );
+                        }))
+                        .branch(case![Command::Close].endpoint({
+                            let state = Arc::clone(&bot_state);
+                            move |bot: Bot, msg: Message, cmd: Command| {
+                                let state = Arc::clone(&state);
+                                async move {
+                                    let chat_id = msg.chat.id.0;
+                                    let topic_id = msg.thread_id.map(|t| t.0 .0);
+                                    let sender_id = msg.from.as_ref().map(|u| u.id.0);
+                                    let sender_username =
+                                        msg.from.as_ref().and_then(|u| u.username.clone());
+                                    if let Err(e) = handle_close(bot, msg, cmd, state).await {
+                                        log_command_error(
+                                            "/close",
+                                            &e,
+                                            chat_id,
+                                            topic_id,
+                                            sender_id,
+                                            sender_username.as_deref(),
+                                        );
+                                    }
+                                    respond(())
+                                }
                             }
-                            respond(())
-                        }
-                    }
-                }))
-                .branch(case![Command::Close].endpoint({
-                    let state = Arc::clone(&bot_state);
-                    move |bot: Bot, msg: Message, cmd: Command| {
-                        let state = Arc::clone(&state);
-                        async move {
-                            let chat_id = msg.chat.id.0;
-                            let topic_id = msg.thread_id.map(|t| t.0 .0);
-                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
-                            let sender_username =
-                                msg.from.as_ref().and_then(|u| u.username.clone());
-                            if let Err(e) = handle_close(bot, msg, cmd, state).await {
-                                log_command_error(
-                                    "/close",
-                                    &e,
-                                    chat_id,
-                                    topic_id,
-                                    sender_id,
-                                    sender_username.as_deref(),
-                                );
+                        }))
+                        .branch(case![Command::Session].endpoint({
+                            let state = Arc::clone(&bot_state);
+                            move |bot: Bot, msg: Message, cmd: Command| {
+                                let state = Arc::clone(&state);
+                                async move {
+                                    let chat_id = msg.chat.id.0;
+                                    let topic_id = msg.thread_id.map(|t| t.0 .0);
+                                    let sender_id = msg.from.as_ref().map(|u| u.id.0);
+                                    let sender_username =
+                                        msg.from.as_ref().and_then(|u| u.username.clone());
+                                    if let Err(e) = handle_session(bot, msg, cmd, state).await {
+                                        log_command_error(
+                                            "/session",
+                                            &e,
+                                            chat_id,
+                                            topic_id,
+                                            sender_id,
+                                            sender_username.as_deref(),
+                                        );
+                                    }
+                                    respond(())
+                                }
                             }
-                            respond(())
-                        }
-                    }
-                }))
-                .branch(case![Command::Link(path)].endpoint({
-                    let state = Arc::clone(&bot_state);
-                    move |bot: Bot, msg: Message, cmd: Command| {
-                        let state = Arc::clone(&state);
-                        async move {
-                            let chat_id = msg.chat.id.0;
-                            let topic_id = msg.thread_id.map(|t| t.0 .0);
-                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
-                            let sender_username =
-                                msg.from.as_ref().and_then(|u| u.username.clone());
-                            if let Err(e) = handle_link(bot, msg, cmd, state).await {
-                                log_command_error(
-                                    "/link",
-                                    &e,
-                                    chat_id,
-                                    topic_id,
-                                    sender_id,
-                                    sender_username.as_deref(),
-                                );
+                        }))
+                        .branch(case![Command::Status].endpoint({
+                            let state = Arc::clone(&bot_state);
+                            move |bot: Bot, msg: Message, cmd: Command| {
+                                let state = Arc::clone(&state);
+                                async move {
+                                    let chat_id = msg.chat.id.0;
+                                    let topic_id = msg.thread_id.map(|t| t.0 .0);
+                                    let sender_id = msg.from.as_ref().map(|u| u.id.0);
+                                    let sender_username =
+                                        msg.from.as_ref().and_then(|u| u.username.clone());
+                                    if let Err(e) = handle_status(bot, msg, cmd, state).await {
+                                        log_command_error(
+                                            "/status",
+                                            &e,
+                                            chat_id,
+                                            topic_id,
+                                            sender_id,
+                                            sender_username.as_deref(),
+                                        );
+                                    }
+                                    respond(())
+                                }
                             }
-                            respond(())
-                        }
-                    }
-                }))
-                .branch(case![Command::Stream].endpoint({
-                    let state = Arc::clone(&bot_state);
-                    move |bot: Bot, msg: Message, cmd: Command| {
-                        let state = Arc::clone(&state);
-                        async move {
-                            let chat_id = msg.chat.id.0;
-                            let topic_id = msg.thread_id.map(|t| t.0 .0);
-                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
-                            let sender_username =
-                                msg.from.as_ref().and_then(|u| u.username.clone());
-                            if let Err(e) = handle_stream(bot, msg, cmd, state).await {
-                                log_command_error(
-                                    "/stream",
-                                    &e,
-                                    chat_id,
-                                    topic_id,
-                                    sender_id,
-                                    sender_username.as_deref(),
-                                );
+                        }))
+                        .branch(case![Command::Help].endpoint({
+                            let state = Arc::clone(&bot_state);
+                            move |bot: Bot, msg: Message, cmd: Command| {
+                                let state = Arc::clone(&state);
+                                async move {
+                                    let chat_id = msg.chat.id.0;
+                                    let topic_id = msg.thread_id.map(|t| t.0 .0);
+                                    let sender_id = msg.from.as_ref().map(|u| u.id.0);
+                                    let sender_username =
+                                        msg.from.as_ref().and_then(|u| u.username.clone());
+                                    if let Err(e) = handle_help(bot, msg, cmd, state).await {
+                                        log_command_error(
+                                            "/help",
+                                            &e,
+                                            chat_id,
+                                            topic_id,
+                                            sender_id,
+                                            sender_username.as_deref(),
+                                        );
+                                    }
+                                    respond(())
+                                }
                             }
-                            respond(())
-                        }
-                    }
-                }))
-                .branch(case![Command::Session].endpoint({
-                    let state = Arc::clone(&bot_state);
-                    move |bot: Bot, msg: Message, cmd: Command| {
-                        let state = Arc::clone(&state);
+                        })),
+                )
+                .branch(dptree::entry().endpoint({
+                    let integration = Arc::clone(&integration);
+                    move |bot: Bot, msg: Message| {
+                        let integration = Arc::clone(&integration);
                         async move {
                             let chat_id = msg.chat.id.0;
                             let topic_id = msg.thread_id.map(|t| t.0 .0);
                             let sender_id = msg.from.as_ref().map(|u| u.id.0);
                             let sender_username =
                                 msg.from.as_ref().and_then(|u| u.username.clone());
-                            if let Err(e) = handle_session(bot, msg, cmd, state).await {
-                                log_command_error(
-                                    "/session",
-                                    &e,
-                                    chat_id,
-                                    topic_id,
-                                    sender_id,
-                                    sender_username.as_deref(),
-                                );
-                            }
-                            respond(())
-                        }
-                    }
-                }))
-                .branch(case![Command::Status].endpoint({
-                    let state = Arc::clone(&bot_state);
-                    move |bot: Bot, msg: Message, cmd: Command| {
-                        let state = Arc::clone(&state);
-                        async move {
-                            let chat_id = msg.chat.id.0;
-                            let topic_id = msg.thread_id.map(|t| t.0 .0);
-                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
-                            let sender_username =
-                                msg.from.as_ref().and_then(|u| u.username.clone());
-                            if let Err(e) = handle_status(bot, msg, cmd, state).await {
-                                log_command_error(
-                                    "/status",
-                                    &e,
-                                    chat_id,
-                                    topic_id,
-                                    sender_id,
-                                    sender_username.as_deref(),
-                                );
-                            }
-                            respond(())
-                        }
-                    }
-                }))
-                .branch(case![Command::Clear].endpoint({
-                    let state = Arc::clone(&bot_state);
-                    move |bot: Bot, msg: Message, cmd: Command| {
-                        let state = Arc::clone(&state);
-                        async move {
-                            let chat_id = msg.chat.id.0;
-                            let topic_id = msg.thread_id.map(|t| t.0 .0);
-                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
-                            let sender_username =
-                                msg.from.as_ref().and_then(|u| u.username.clone());
-                            if let Err(e) = handle_clear(bot, msg, cmd, state).await {
-                                log_command_error(
-                                    "/clear",
-                                    &e,
-                                    chat_id,
-                                    topic_id,
-                                    sender_id,
-                                    sender_username.as_deref(),
-                                );
-                            }
-                            respond(())
-                        }
-                    }
-                }))
-                .branch(case![Command::Help].endpoint({
-                    let state = Arc::clone(&bot_state);
-                    move |bot: Bot, msg: Message, cmd: Command| {
-                        let state = Arc::clone(&state);
-                        async move {
-                            let chat_id = msg.chat.id.0;
-                            let topic_id = msg.thread_id.map(|t| t.0 .0);
-                            let sender_id = msg.from.as_ref().map(|u| u.id.0);
-                            let sender_username =
-                                msg.from.as_ref().and_then(|u| u.username.clone());
-                            if let Err(e) = handle_help(bot, msg, cmd, state).await {
-                                log_command_error(
-                                    "/help",
-                                    &e,
-                                    chat_id,
-                                    topic_id,
-                                    sender_id,
-                                    sender_username.as_deref(),
-                                );
+
+                            if let Err(e) = integration.handle_message(bot, msg).await {
+                                if e.is_user_error() {
+                                    warn!(
+                                        chat_id = chat_id,
+                                        topic_id = ?topic_id,
+                                        sender_id = ?sender_id,
+                                        sender_username = ?sender_username,
+                                        error = %e,
+                                        "User error handling message"
+                                    );
+                                } else {
+                                    error!(
+                                        chat_id = chat_id,
+                                        topic_id = ?topic_id,
+                                        sender_id = ?sender_id,
+                                        sender_username = ?sender_username,
+                                        error = %e,
+                                        "Error handling message"
+                                    );
+                                }
                             }
                             respond(())
                         }
                     }
                 })),
         )
-        .branch(Update::filter_message().endpoint({
-            let integration = Arc::clone(&integration);
-            move |bot: Bot, msg: Message| {
-                let integration = Arc::clone(&integration);
-                async move {
-                    let chat_id = msg.chat.id.0;
-                    let topic_id = msg.thread_id.map(|t| t.0 .0);
-                    let sender_id = msg.from.as_ref().map(|u| u.id.0);
-                    let sender_username = msg.from.as_ref().and_then(|u| u.username.clone());
-
-                    if let Err(e) = integration.handle_message(bot, msg).await {
-                        if e.is_user_error() {
-                            warn!(
-                                chat_id = chat_id,
-                                topic_id = ?topic_id,
-                                sender_id = ?sender_id,
-                                sender_username = ?sender_username,
-                                error = %e,
-                                "User error handling message"
-                            );
-                        } else {
-                            error!(
-                                chat_id = chat_id,
-                                topic_id = ?topic_id,
-                                sender_id = ?sender_id,
-                                sender_username = ?sender_username,
-                                error = %e,
-                                "Error handling message"
-                            );
-                        }
-                    }
-                    respond(())
-                }
-            }
-        }))
         .branch(Update::filter_callback_query().endpoint({
             let state = Arc::clone(&bot_state);
             move |bot: Bot, q: CallbackQuery| {
@@ -531,9 +413,6 @@ async fn main() -> Result<()> {
 
     info!("Stopping active streams...");
     integration.stop_all_streams().await;
-
-    info!("Stopping API server...");
-    api_handle.abort();
 
     info!("Finishing run log...");
     if let Err(e) = log_store.finish_run(&run_id).await {
