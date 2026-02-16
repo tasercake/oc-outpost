@@ -34,12 +34,12 @@ Replit built a Copy-on-Write block-device storage layer that enables instant fil
 3. **Parallel sampling with infrastructure support**: Using LLM non-determinism + cheap forks to run N agents on the same problem simultaneously, pick the best result. They cite 72→80% on SWE-bench with this technique.
 4. **Storage infra designed for humans also benefits agents**: The same primitives that make collaboration fast (remix/fork) make agent safety cheap.
 
-## Applicable to Tavus
+## Practical Applications
 
-- **Video pipeline state is analogous to database state**: If Tavus's coding agent modifies video processing configs, model weights, or pipeline parameters, having reversible snapshots prevents catastrophic changes.
-- **Dev/prod isolation pattern**: Critical for any AI agent that touches production systems. Tavus should ensure their agent operates in sandboxed environments with forkable state.
+- **Video pipeline state is analogous to database state**: If your team's coding agent modifies video processing configs, model weights, or pipeline parameters, having reversible snapshots prevents catastrophic changes.
+- **Dev/prod isolation pattern**: Critical for any AI agent that touches production systems. Your team should ensure their agent operates in sandboxed environments with forkable state.
 - **Parallel exploration**: Could run multiple agent attempts at solving a code task and pick the best—especially valuable for complex video processing optimizations.
-- **Checkpoint = code + state**: If Tavus's agent modifies both code and system configuration, checkpoints need to capture both atomically.
+- **Checkpoint = code + state**: If your team's agent modifies both code and system configuration, checkpoints need to capture both atomically.
 
 ## Open questions
 

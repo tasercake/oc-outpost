@@ -36,11 +36,11 @@ Replit built a REPL-based verification system where a testing subagent executes 
 4. **REPL persistence as implicit memory**: The notebook pattern lets the agent build up state in code rather than in context tokens. Variables are "free" memory that doesn't consume context window.
 5. **Verification spectrum**: LSP → Unit tests → API tests → Browser automation → Browser use → Computer use. Each level catches different classes of bugs. The sweet spot for agents is code-based browser automation in a REPL.
 
-## Applicable to Tavus
+## Practical Applications
 
-- **Video "Potemkin interfaces"**: Tavus's agent could produce video pipeline code that appears to work (renders something) but doesn't actually implement the requested feature correctly. Need equivalent verification—perhaps rendering test frames and comparing against expectations.
+- **Video "Potemkin interfaces"**: your team's agent could produce video pipeline code that appears to work (renders something) but doesn't actually implement the requested feature correctly. Need equivalent verification—perhaps rendering test frames and comparing against expectations.
 - **Subagent pattern for verification**: Split testing into a separate agent context to avoid polluting the coding context. This is a general best practice.
-- **Code-use paradigm**: If Tavus needs agents to verify video outputs, having the agent write verification scripts (e.g., Python with OpenCV) rather than using pixel-level tools would be more efficient.
+- **Code-use paradigm**: If your team needs agents to verify video outputs, having the agent write verification scripts (e.g., Python with OpenCV) rather than using pixel-level tools would be more efficient.
 - **REPL for iterative exploration**: Let the verification agent incrementally inspect outputs, build up state, and run increasingly sophisticated checks.
 - **Testability by design**: Prompt the code-generating agent to add hooks, logging, and assertions that make verification easier downstream.
 

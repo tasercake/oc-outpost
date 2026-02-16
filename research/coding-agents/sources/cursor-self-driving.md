@@ -72,19 +72,19 @@ Deep technical post-mortem on Cursor's multi-agent harness evolution through 5+ 
 
 10. **The "ideal efficient system" accepts some error rate** with a final reconciliation pass, rather than perfect code 100% of the time.
 
-## Applicable to Tavus
+## Practical Applications
 
-- **Agent developer experience matters:** If Tavus's codebase has long build times, monolith structure, or complex setup, agents will be slower. Modularizing specifically for agent productivity is a real lever.
+- **Agent developer experience matters:** If your team's codebase has long build times, monolith structure, or complex setup, agents will be slower. Modularizing specifically for agent productivity is a real lever.
 - **Handoff-based architecture:** For a coding agent product, structured handoffs (what was done + concerns + deviations) is a pattern to adopt for multi-step workflows.
 - **Prompting patterns directly applicable:**
   - Constraints > instructions
   - Concrete numbers for scope
   - Don't instruct what models already know
   - Describe intent, not checkboxes
-- **Freshness mechanisms** (scratchpad rewriting, auto-summarization, self-reflection) critical for any long-running agent Tavus builds
+- **Freshness mechanisms** (scratchpad rewriting, auto-summarization, self-reflection) critical for any long-running agent your team builds
 - **Single VM simplicity:** Don't prematurely distribute. A single large machine with good observability can handle hundreds of agents.
 - **Observability-first:** Log everything, replay sessions, use Cursor itself to analyze agent logs. Essential for iterating on agent behavior.
-- **Specification quality scales with compute:** If Tavus runs expensive agent workflows, investing in specification/intent quality has outsized ROI.
+- **Specification quality scales with compute:** If your team runs expensive agent workflows, investing in specification/intent quality has outsized ROI.
 
 ## Open questions
 

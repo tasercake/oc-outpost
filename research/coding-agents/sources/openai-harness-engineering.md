@@ -87,12 +87,12 @@ OpenAI built a real product with **zero manually-written code** over 5 months us
 9. **Ephemeral observability stacks per worktree** — each agent gets isolated logs/metrics that are torn down after the task. Enables performance-oriented prompts.
 10. **Plans as first-class versioned artifacts** — execution plans with progress and decision logs checked into the repo, not in project management tools.
 
-## Applicable to Tavus
+## Practical Applications
 - **"Map, not manual" for AGENTS.md** — directly applicable. Keep it short, point to structured docs.
-- **Lint errors as agent instructions** — Tavus could write custom linters for video pipeline code that tell the agent exactly how to fix issues (e.g., "use our VideoEncoder abstraction, not raw ffmpeg calls").
-- **Ephemeral environments per worktree** — critical for Tavus where video processing might need GPU resources, specific model checkpoints, etc. Each agent run gets its own isolated stack.
+- **Lint errors as agent instructions** — Your team could write custom linters for video pipeline code that tell the agent exactly how to fix issues (e.g., "use our VideoEncoder abstraction, not raw ffmpeg calls").
+- **Ephemeral environments per worktree** — critical for your team where video processing might need GPU resources, specific model checkpoints, etc. Each agent run gets its own isolated stack.
 - **"Boring tech" preference** — for a video AI company, this means being deliberate about which ML frameworks/tools are exposed to agents vs. abstracted behind stable interfaces.
-- **Quality grades per domain** — Tavus could track agent-generated code quality across video pipeline, API, frontend, ML inference separately.
+- **Quality grades per domain** — Your team could track agent-generated code quality across video pipeline, API, frontend, ML inference separately.
 - **Garbage collection process** — automated cleanup agents scanning for code drift, especially important in fast-moving ML codebases.
 - **Agent-legible observability** — expose video processing metrics (latency, quality scores, resource usage) to agents via queryable interfaces.
 - **Reimplement vs import** — for video-specific utilities, having agent-written, fully-tested, tightly-integrated helpers may be better than wrapping complex video libraries.

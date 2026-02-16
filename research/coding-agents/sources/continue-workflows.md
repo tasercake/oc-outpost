@@ -27,11 +27,11 @@ Continue ships cloud-based "Agents" that run asynchronously in the background, s
 - **Continuous AI as a paradigm** — AI shouldn't just respond to queries; it should run continuously like CI/CD. Tests run in background, why not AI?
 - **PR volume as a scaling problem** — when agents produce many PRs, the bottleneck shifts from code generation to code review. This is under-discussed elsewhere.
 
-## Applicable to Tavus
+## Practical Applications
 - **Background agents for video pipeline QA** — continuous agents could monitor video generation outputs, flag quality regressions, or auto-fix template issues.
-- **Prompt-as-config pattern** — if Tavus builds a coding agent, the idea of testing prompts locally (CLI) before deploying to production is directly applicable.
+- **Prompt-as-config pattern** — if your team builds a coding agent, the idea of testing prompts locally (CLI) before deploying to production is directly applicable.
 - **Agent orchestration** — multiple specialized agents (security, quality, docs) running in parallel on every PR is a pattern worth adopting.
-- **Review bottleneck** — Tavus should plan for how humans review agent-generated code at scale.
+- **Review bottleneck** — Your team should plan for how humans review agent-generated code at scale.
 
 ## Open questions
 - How do they handle agent failures? Retry logic? Human escalation?

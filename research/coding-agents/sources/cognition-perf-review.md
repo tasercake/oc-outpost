@@ -41,13 +41,13 @@ After 18 months and hundreds of thousands of merged PRs, Devin is best character
 4. **The bottleneck shifted**: From "writing code" to "reviewing/accepting code" and "scoping work for agents." This creates new organizational roles and skills.
 5. **Data analysis is an unexpected wedge**: "@Devin in Slack, ask a data question" is a simpler entry point than full coding tasks. Lower stakes, faster feedback, builds trust.
 
-## Applicable to Tavus
+## Practical Applications
 
-- **Fleet model for repetitive tasks**: If Tavus has many repos or many similar codegen tasks (e.g., generating video processing pipelines), the "playbook + fleet" pattern is directly applicable.
-- **Agent as data analyst**: Tavus could use an agent for internal data questions ("what were yesterday's video generations by customer?") as a quick-win entry point before tackling harder coding tasks.
+- **Fleet model for repetitive tasks**: If your team has many repos or many similar codegen tasks (e.g., generating video processing pipelines), the "playbook + fleet" pattern is directly applicable.
+- **Agent as data analyst**: Your team could use an agent for internal data questions ("what were yesterday's video generations by customer?") as a quick-win entry point before tackling harder coding tasks.
 - **Documentation generation**: Before the agent writes code, it should deeply understand the codebase. DeepWiki-like capabilities (auto-generated docs) could be a prerequisite feature.
-- **Clear scoping matters most**: The #1 determinant of agent success is quality of task specification. Tavus should invest in UX for task scoping/requirements, not just execution.
-- **Merge rate as north star metric**: 67% merge rate is their primary success metric. Tavus should track acceptance/merge rate of agent-generated code.
+- **Clear scoping matters most**: The #1 determinant of agent success is quality of task specification. Your team should invest in UX for task scoping/requirements, not just execution.
+- **Merge rate as north star metric**: 67% merge rate is their primary success metric. Your team should track acceptance/merge rate of agent-generated code.
 - **Scope changes are poison**: Design the agent interaction to discourage mid-task pivots. Better to cancel and restart with new specs.
 
 ## Open Questions

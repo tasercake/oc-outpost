@@ -45,14 +45,14 @@ A two-agent architecture (initializer + coding agent) solves the core problem of
 5. **The initializer agent is doing prompt engineering for future agents** — it's essentially writing the context that will guide all subsequent work. Meta-prompting.
 6. **Git is an underappreciated agent tool** — not just version control, but a recovery mechanism and orientation system.
 
-## Applicable to Tavus
+## Practical Applications
 
 - **Video generation pipeline as feature list:** Break complex video generation tasks into discrete, testable features (avatar rendering, lip sync, voice synthesis, scene transitions). Each feature gets pass/fail status.
-- **Session handoff for long renders:** If a coding agent is building/debugging Tavus's video pipeline, the progress file + git pattern ensures continuity across sessions.
-- **Browser automation for visual testing:** Tavus's output is visual — using browser automation or screenshot comparison to verify video output quality mirrors the Puppeteer testing approach.
-- **Init script pattern:** For Tavus's likely complex dev environment (GPU servers, model servers, video processing pipelines), having an agent-written init script prevents wasted context on environment setup.
+- **Session handoff for long renders:** If a coding agent is building/debugging your team's video pipeline, the progress file + git pattern ensures continuity across sessions.
+- **Browser automation for visual testing:** your team's output is visual — using browser automation or screenshot comparison to verify video output quality mirrors the Puppeteer testing approach.
+- **Init script pattern:** For your team's likely complex dev environment (GPU servers, model servers, video processing pipelines), having an agent-written init script prevents wasted context on environment setup.
 - **Incremental approach for complex systems:** Video AI has many interdependent components — the "one feature at a time, leave it clean" discipline would prevent cascading failures.
-- **JSON feature tracking:** For a coding agent helping Tavus engineers, maintaining a JSON-based task tracker prevents the agent from drifting or declaring premature victory.
+- **JSON feature tracking:** For a coding agent helping your engineers, maintaining a JSON-based task tracker prevents the agent from drifting or declaring premature victory.
 
 ## Open Questions
 

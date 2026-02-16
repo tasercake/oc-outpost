@@ -33,10 +33,10 @@ Cognition co-launched Agent Trace, an open vendor-neutral spec for recording AI 
 5. **Foundation Capital's "Context Graphs" framing**: "A living record of decision traces stitched across entities and time so precedent becomes searchable." Agent Trace is an implementation of this.
 6. **"AI Engineers will spend majority of time crafting and reading context more than code"**: This redefines what an AI engineer does.
 
-## Applicable to Tavus
+## Practical Applications
 
-- **Adopt Agent Trace early**: If Tavus's coding agent generates code, tracing provenance is critical for debugging, auditing, and improving the agent over time.
-- **Context retrieval as agent capability**: Tavus's agent should be able to query "why was this code written this way?" from traces. This dramatically reduces re-investigation time.
+- **Adopt Agent Trace early**: If your team's coding agent generates code, tracing provenance is critical for debugging, auditing, and improving the agent over time.
+- **Context retrieval as agent capability**: your team's agent should be able to query "why was this code written this way?" from traces. This dramatically reduces re-investigation time.
 - **Eng management dashboards**: Track AI vs human contributions, understand where the agent adds value, identify where it struggles. Data-driven agent improvement.
 - **Video pipeline provenance**: For AI-generated video processing code, traces could track which customer requirement or video feature led to each code change.
 - **Cache hit optimization**: If agent traces improve cache hit rates 40-80%, this directly reduces inference cost.

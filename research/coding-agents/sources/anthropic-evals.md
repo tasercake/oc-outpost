@@ -50,16 +50,16 @@ A comprehensive guide to building agent evaluations, covering grader types (code
 7. **Evals accelerate model adoption.** Teams with evals upgrade to new models in days. Teams without spend weeks manually testing.
 8. **Reading transcripts is a critical skill.** "We regularly take the time to read them." Without reading transcripts, you can't tell if graders are working correctly.
 
-## Applicable to Tavus
+## Practical Applications
 
-- **Video editing agent evals (Descript parallel):** Descript's "don't break things, do what I asked, do it well" framework directly applies to a Tavus coding agent. Replace video editing with video generation — same three dimensions.
+- **Video editing agent evals (Descript parallel):** Descript's "don't break things, do what I asked, do it well" framework directly applies to your coding agent. Replace video editing with video generation — same three dimensions.
 - **Visual output grading:** For a coding agent building video features, combine deterministic graders (does the video render? correct resolution? right duration?) with LLM graders (is the output visually acceptable? does lip sync look natural?).
 - **Capability vs. regression split:** Capability evals for new video features (new avatar styles, new languages). Regression evals for existing functionality (existing avatars still render correctly after code changes).
-- **pass^k for production video generation:** Tavus customers expect consistent quality. pass^k is the right metric — every generation should succeed, not just one out of k.
+- **pass^k for production video generation:** your customers expect consistent quality. pass^k is the right metric — every generation should succeed, not just one out of k.
 - **Start with 20-50 tasks from real failures:** Collect actual user-reported video quality issues and encode them as eval tasks.
 - **Browser-based visual testing:** Use browser agents or screenshot comparison to verify video output quality, similar to how Bolt tests web apps.
-- **Eval-driven development for new models:** When new vision/video models release, eval suites let Tavus quickly determine if they improve generation quality.
-- **Product team owning evals:** Tavus product managers defining "what does a good video look like" as eval criteria prevents engineering-product misalignment.
+- **Eval-driven development for new models:** When new vision/video models release, eval suites let your team quickly determine if they improve generation quality.
+- **Product team owning evals:** Your product managers defining "what does a good video look like" as eval criteria prevents engineering-product misalignment.
 
 ## Open Questions
 

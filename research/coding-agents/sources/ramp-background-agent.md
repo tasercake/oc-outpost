@@ -70,10 +70,10 @@ Ramp built "Inspect," a background coding agent running in sandboxed Modal VMs w
 7. **"It only has to work on your code"** — owning the tooling means you can optimize for your specific codebase, which will always beat general-purpose tools.
 8. **Follow-ups are queued, not injected mid-execution** — simpler and lets users "think ahead" while agent works.
 
-## Applicable to Tavus
-- **Modal sandbox architecture** is directly replicable — Tavus could have agents with full video pipeline access (FFmpeg, ML inference runtimes, etc.).
+## Practical Applications
+- **Modal sandbox architecture** is directly replicable — Your team could have agents with full video pipeline access (FFmpeg, ML inference runtimes, etc.).
 - **Multiplayer sessions** could let product/design collaborate with engineering on video feature development.
-- **Chrome extension approach** for visual verification is highly relevant — Tavus likely has React-based UIs for video configuration that could benefit from visual element selection.
+- **Chrome extension approach** for visual verification is highly relevant — your team likely has React-based UIs for video configuration that could benefit from visual element selection.
 - **Speed optimizations** (warm on keystroke, pre-built images) are essential for adoption — if it's slow, people won't use it.
 - **Slack integration with repo classifier** is low-hanging fruit for any company with multiple repos.
 - **Sub-agent spawning** for parallel approaches (try different models/prompts) is useful when exploring video processing algorithms.

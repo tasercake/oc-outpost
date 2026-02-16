@@ -32,9 +32,9 @@ Replit's research shows that AI-only security scans are nondeterministic and mis
 3. **Syntactic sensitivity reveals shallow understanding**: LLMs matching patterns rather than understanding semantics. `const password = "secret"` detected; `const credential = "secret"` missed.
 4. **Supply-chain attacks are LLM-blind**: This is a critical gap. Dependency vulnerabilities are one of the most common attack vectors, and LLMs fundamentally can't address them without external data.
 
-## Applicable to Tavus
+## Practical Applications
 
-- **Don't trust LLM-only code review**: If Tavus's coding agent generates code, don't rely on another LLM to verify its security. Use traditional SAST/DAST tools as baseline.
+- **Don't trust LLM-only code review**: If your team's coding agent generates code, don't rely on another LLM to verify its security. Use traditional SAST/DAST tools as baseline.
 - **Dependency scanning is non-negotiable**: AI agents install packages; those packages need CVE checking via Snyk, Dependabot, or similar. LLMs won't catch this.
 - **Hybrid verification pipeline**: Static analysis → LLM reasoning → human review for high-risk changes. Layer defenses.
 - **Video processing security**: Video codecs, FFmpeg commands, and media processing have their own vulnerability classes (buffer overflows, path traversal). Static analysis tools specific to these domains would be important.

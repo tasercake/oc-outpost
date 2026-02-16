@@ -38,11 +38,11 @@ Sourcegraph details their two-stage context engine (retrieval → ranking) that 
 - **Synthetic datasets as evaluation workaround** — when human annotation is too expensive and open-source benchmarks are low quality, synthetic data fills the gap.
 - **The context engine is a "specialized search tool within the broader AI assistant architecture"** — framing context retrieval as a tool the agent uses (like a human searching docs).
 
-## Applicable to Tavus
-- **Two-stage retrieval + ranking is the pattern** — if Tavus builds code search/context for their coding agent, this architecture is proven at scale.
+## Practical Applications
+- **Two-stage retrieval + ranking is the pattern** — if your team builds code search/context for their coding agent, this architecture is proven at scale.
 - **Multiple retriever types** — don't rely on just embeddings or just keyword search. Complementary retrievers are key.
 - **Token budget management** — critical for any LLM-based system. Treat it as a knapsack optimization problem.
-- **Evaluation methodology** — the lack of ground truth for context quality will also affect Tavus. Consider synthetic datasets early.
+- **Evaluation methodology** — the lack of ground truth for context quality will also affect any team. Consider synthetic datasets early.
 - **Irrelevant context degrades quality** — when building RAG for video pipeline code, be aggressive about filtering. Less is more.
 - **Latency constraints** — if building IDE integrations, retrieval must be sub-second. Design for this from the start.
 

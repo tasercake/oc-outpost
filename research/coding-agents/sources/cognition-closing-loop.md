@@ -32,11 +32,11 @@ Cognition shipped auto-fix for PR review comments—when any GitHub bot (linter,
 3. **"Even the best engineers don't catch everything on first pass"**: The argument for review isn't just about AI slop—it's about the fundamental nature of writing vs. reviewing being different cognitive tasks.
 4. **The feedback loop is the product**: Not the individual agent capabilities, but the closed loop between them. This is a systems thinking insight.
 
-## Applicable to Tavus
+## Practical Applications
 
-- **Build the review loop early**: If Tavus's coding agent generates PRs, adding automated review + autofix creates a compound system. Don't ship a write-only agent.
+- **Build the review loop early**: If your team's coding agent generates PRs, adding automated review + autofix creates a compound system. Don't ship a write-only agent.
 - **Review bottleneck applies to video pipelines too**: As AI generates more video processing code, the bottleneck shifts to validating that code works correctly. Automated testing/validation loops are essential.
-- **Token cost is a real tradeoff**: The loop burns tokens. Tavus should budget for 2-5x the generation cost for review+fix iterations.
+- **Token cost is a real tradeoff**: The loop burns tokens. Your team should budget for 2-5x the generation cost for review+fix iterations.
 - **Ecosystem integration via bot comments**: A generic "listen for bot comments, auto-fix" pattern is reusable across any GitHub-based workflow.
 
 ## Open Questions

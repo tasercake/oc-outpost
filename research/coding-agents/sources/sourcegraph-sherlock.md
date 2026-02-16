@@ -33,10 +33,10 @@ Sourcegraph's security team built Sherlock, an internal LLM-powered tool that en
 - **Internal tools as proving grounds** — Sherlock was built for internal use first. Low-stakes environment to iterate before productizing.
 - **Security review is a perfect LLM use case** — bounded scope (PR diff), clear evaluation criteria (vulnerability found or not), and human-in-the-loop validation.
 
-## Applicable to Tavus
+## Practical Applications
 - **PR-triggered security review agent** — directly applicable. Any company can build a Sherlock-equivalent. Especially valuable for video pipeline code handling user data.
-- **SAST + LLM hybrid approach** — if Tavus uses static analysis tools, feeding their output into an LLM for contextual triage is a quick win.
-- **Custom security prompts for domain** — Tavus handles video, potentially PII in video content, media processing. Domain-specific security prompts would be valuable.
+- **SAST + LLM hybrid approach** — if your team uses static analysis tools, feeding their output into an LLM for contextual triage is a quick win.
+- **Custom security prompts for domain** — Your team handles video, potentially PII in video content, media processing. Domain-specific security prompts would be valuable.
 - **Hackathon → production pipeline** — good model for introducing AI-assisted security review. Start with a hackathon, prove value on real PRs, scale.
 - **Edge case enumeration for video processing** — LLMs could enumerate edge cases in video codec handling, stream processing, etc. that scanners can't detect.
 - **Dual-output pattern (Slack + SIEM)** — good architecture for any AI-powered monitoring/review system.

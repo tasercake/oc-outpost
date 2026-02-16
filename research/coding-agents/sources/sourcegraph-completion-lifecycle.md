@@ -44,7 +44,7 @@ Sourcegraph details the full four-stage pipeline (Planning → Retrieval → Gen
 - **LLM probabilities as quality signal** — with open models (StarCoder), you can use token probabilities to score completion confidence. Not available with Claude.
 - **"If we err on the side of not showing completions, users think the product doesn't work"** — showing a mediocre completion is better than showing nothing. Users prefer imperfect to absent.
 
-## Applicable to Tavus
+## Practical Applications
 - **Four-stage pipeline pattern** — directly applicable architecture for any AI completion/generation system, including video generation pipelines.
 - **Rule-based planning before expensive AI** — pre-classify requests with fast heuristics before invoking LLMs. Saves cost and latency.
 - **Tree-sitter equivalent for video/media** — find a "Tree-sitter" for your domain: fast, incremental, error-tolerant parsing of domain-specific structures.

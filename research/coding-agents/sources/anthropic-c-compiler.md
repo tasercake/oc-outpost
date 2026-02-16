@@ -52,15 +52,15 @@
 7. **Cost curve is dramatic:** $20K for a C compiler that would cost a team of engineers months/years. Even if quality is lower, the speed/cost tradeoff is unprecedented.
 8. **Agent teams change the ambition level:** "Allows us, as users of these tools, to become more ambitious with our goals." This isn't incremental — it's a phase change in what's achievable.
 
-## Applicable to Tavus
+## Practical Applications
 
 - **Parallel agents for video pipeline components:** Different agents working on different video processing stages simultaneously — one on avatar rendering, one on audio processing, one on encoding. Git-based coordination.
 - **Oracle pattern for video quality:** Use an existing high-quality renderer as oracle. Compare Claude's output against reference. Binary search to find which code changes degrade quality.
-- **Test harness design for video agents:** Tavus's test output should be optimized for LLM consumption — not dumping raw video processing logs but summarized metrics (frame quality scores, sync offsets, render times).
+- **Test harness design for video agents:** your team's test output should be optimized for LLM consumption — not dumping raw video processing logs but summarized metrics (frame quality scores, sync offsets, render times).
 - **Specialized agent roles:** Dedicated agents for: code quality, documentation, performance optimization, test writing. The deduplication agent role is especially relevant for large codebases.
 - **Fast test subsets:** For video processing tests (which are slow), implement `--fast` flag with deterministic random sampling. Each agent session runs a subset, coverage across all agents.
 - **CI pipeline for autonomous work:** As the project matures, stricter CI enforcement prevents agents from breaking existing functionality — critical for production video systems.
-- **Cost-benefit analysis:** If Tavus can parallelize coding agent work, the cost-to-value ratio may justify significant API spend for complex features that would otherwise require weeks of engineering.
+- **Cost-benefit analysis:** If your team can parallelize coding agent work, the cost-to-value ratio may justify significant API spend for complex features that would otherwise require weeks of engineering.
 - **Time blindness mitigation:** Video processing involves long-running operations. Agents need progress reporting and time limits to prevent getting stuck in test loops.
 
 ## Open Questions

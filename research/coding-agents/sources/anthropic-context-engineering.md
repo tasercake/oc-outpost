@@ -46,14 +46,14 @@ Context engineering is the evolution of prompt engineering — it's the art of c
 6. **Pictures > words for LLMs too:** "Examples are the 'pictures' worth a thousand words" — few-shot examples are more token-efficient than exhaustive rule lists.
 7. **Performance gradient, not cliff:** Models don't suddenly fail at longer contexts. They show "reduced precision for information retrieval and long-range reasoning" — a gentle degradation.
 
-## Applicable to Tavus
+## Practical Applications
 
-- **Attention budget for video context:** When a Tavus coding agent works on the video pipeline, it can't hold the entire codebase in context. Just-in-time retrieval (grep for relevant video processing code) is essential.
-- **Hybrid retrieval for domain knowledge:** Pre-load Tavus-specific conventions (like CLAUDE.md) — video format specs, API contracts, model configurations. Let the agent explore implementation details on demand.
+- **Attention budget for video context:** When your coding agent works on the video pipeline, it can't hold the entire codebase in context. Just-in-time retrieval (grep for relevant video processing code) is essential.
+- **Hybrid retrieval for domain knowledge:** Pre-load domain-specific conventions (like CLAUDE.md) — video format specs, API contracts, model configurations. Let the agent explore implementation details on demand.
 - **Compaction for long video debugging sessions:** Video pipeline debugging can span many turns. Compacting while preserving "architectural decisions, unresolved bugs, implementation details" is directly applicable.
 - **Sub-agents for parallel exploration:** One sub-agent investigates a rendering bug, another reviews audio sync, a third checks encoding. Each returns a condensed summary to the coordinator.
 - **Structured note-taking for complex pipelines:** A NOTES.md tracking which video components are working, which are broken, and what was tried prevents context loss across sessions.
-- **Tool design matters:** Tavus's coding agent tools (file editing, test running, video preview) should be non-overlapping, well-described, and token-efficient in their output.
+- **Tool design matters:** your team's coding agent tools (file editing, test running, video preview) should be non-overlapping, well-described, and token-efficient in their output.
 - **Progressive disclosure for large codebases:** Let the agent discover the video pipeline architecture layer by layer rather than dumping entire codebases upfront.
 
 ## Open Questions

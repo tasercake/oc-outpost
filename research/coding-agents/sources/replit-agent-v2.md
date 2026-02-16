@@ -31,10 +31,10 @@ Agent v2 introduced hypothesis-driven autonomy (search before edit), loop-avoida
 2. **Real-time preview as feedback loop**: Not just a UX feature—it could serve as an additional signal for the agent itself (visual verification during generation).
 3. **Loop avoidance as a first-class feature**: Recognizing and breaking out of repetitive failure loops is one of the hardest problems in autonomous agents.
 
-## Applicable to Tavus
+## Practical Applications
 
 - **Read-before-write pattern**: Any coding agent should understand the codebase before making changes. Especially important in a complex video processing codebase.
-- **Real-time preview**: For Tavus, could mean showing video output or pipeline state as the agent modifies code—instant visual feedback.
+- **Real-time preview**: Could mean showing video output or pipeline state as the agent modifies code—instant visual feedback.
 - **Loop detection**: Critical for long-running autonomous tasks. Build explicit loop detection into the agent scaffolding.
 
 ## Open questions

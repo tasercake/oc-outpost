@@ -28,10 +28,10 @@ Continue's "Anti-Slop" agent runs in CI on every PR to detect and fix AI-generat
 - **The review bottleneck is the new problem** — with 700K lines of generated code, the constraint has shifted entirely from writing to reviewing.
 - **Signals → agents pattern** — "A PR opens, an agent reviews it. An alert fires, an agent triages it." Event-driven agent architecture.
 
-## Applicable to Tavus
+## Practical Applications
 - **Multi-pass agent architecture** — for a coding agent: don't try to make one agent do everything. Have a generation pass and separate quality/review passes.
-- **Encoding team standards** — Tavus could encode video pipeline quality standards, API design patterns, or security requirements as review agents.
-- **CI integration pattern** — running agents in CI is immediately applicable. Could add Tavus-specific agents for video codec compliance, performance regression checks, etc.
+- **Encoding team standards** — Your team could encode video pipeline quality standards, API design patterns, or security requirements as review agents.
+- **CI integration pattern** — running agents in CI is immediately applicable. Could add domain-specific agents for video codec compliance, performance regression checks, etc.
 - **Fresh context > stale context** — when building long-running agents, consider breaking work into passes with fresh contexts rather than one continuous session.
 
 ## Open questions

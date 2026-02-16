@@ -32,11 +32,11 @@ Replit launched its first AI Agent—a system that takes natural language descri
 2. **Non-developer market is massive**: The examples (doctor building dashboards, students building campus tools) show the real market isn't developers—it's everyone else.
 3. **Replacing SaaS with custom apps**: Instead of subscribing to generic tools (Zapier, dashboarding tools), users build exactly what they need. This could be a paradigm shift.
 
-## Applicable to Tavus
+## Practical Applications
 
-- **End-to-end matters**: If Tavus builds a coding agent, it should handle the full lifecycle—not just write code but also test, deploy, and monitor.
-- **Non-developer users**: Tavus's customers (marketers, sales teams) might want to customize video pipelines without engineering help. Agent-as-interface.
-- **Platform integration is the moat**: The agent is powerful because it's deeply integrated with Replit's platform. Tavus's agent would similarly be most powerful if deeply integrated with their video infrastructure.
+- **End-to-end matters**: If your team builds a coding agent, it should handle the full lifecycle—not just write code but also test, deploy, and monitor.
+- **Non-developer users**: your team's customers (marketers, sales teams) might want to customize video pipelines without engineering help. Agent-as-interface.
+- **Platform integration is the moat**: The agent is powerful because it's deeply integrated with Replit's platform. your team's agent would similarly be most powerful if deeply integrated with their video infrastructure.
 
 ## Open questions
 

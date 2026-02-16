@@ -36,13 +36,13 @@ Cognition rebuilt Devin's architecture for Sonnet 4.5, discovering that the mode
 4. **You can't just drop in a new model** — architectural assumptions about model behavior break across generations. Agent architectures are tightly coupled to model behavioral profiles.
 5. **The model underestimates remaining tokens consistently** — systematic bias, not random error.
 
-## Applicable to Tavus
+## Practical Applications
 
-- **Model migration is architecture work, not a config change**: When Tavus upgrades underlying models for their coding agent, they should expect to re-tune prompting, memory management, and execution strategies.
-- **Context management is a first-class concern**: The 1M-beta-but-cap-at-200k trick is applicable to any agent that uses Claude models. Tavus should test for context anxiety in their agent.
+- **Model migration is architecture work, not a config change**: When your team upgrades underlying models for their coding agent, they should expect to re-tune prompting, memory management, and execution strategies.
+- **Context management is a first-class concern**: The 1M-beta-but-cap-at-200k trick is applicable to any agent that uses Claude models. Your team should test for context anxiety in their agent.
 - **Don't trust model's self-summarization for critical state**: Build proprietary compaction/memory systems. The model's notes are a starting point, not a replacement.
-- **Feedback loops via test execution**: Having the agent write and run verification scripts is high-value. Tavus's agent should be encouraged to create self-checks.
-- **Parallel tool calls**: If Tavus's agent runs multiple independent operations (e.g., reading multiple files, running multiple commands), enabling parallelism gives major speed wins but requires context budget management.
+- **Feedback loops via test execution**: Having the agent write and run verification scripts is high-value. your team's agent should be encouraged to create self-checks.
+- **Parallel tool calls**: If your team's agent runs multiple independent operations (e.g., reading multiple files, running multiple commands), enabling parallelism gives major speed wins but requires context budget management.
 
 ## Open Questions
 

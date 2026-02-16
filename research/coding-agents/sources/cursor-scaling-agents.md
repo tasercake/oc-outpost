@@ -42,13 +42,13 @@ Cursor ran hundreds of concurrent coding agents for weeks on ambitious projects 
 4. **Prompts dominate system behavior** at scale—more than the harness architecture or model choice.
 5. **Resemblance to human org structures is emergent**, not designed. The planner/worker pattern mirrors how software teams actually operate.
 
-## Applicable to Tavus
+## Practical Applications
 
-- **Multi-agent for large migrations:** The Solid→React migration pattern directly applies to any large codebase refactor Tavus might need
+- **Multi-agent for large migrations:** The Solid→React migration pattern directly applies to any large codebase refactor your team might need
 - **Role-specialized models:** If building a coding agent, consider using different models for planning vs execution vs review
 - **Accept imperfection, fix forward:** For internal tooling or CI-gated pipelines, allowing agents to produce imperfect code that gets iteratively fixed may be more efficient than demanding perfection
 - **Prompt engineering at scale:** Investment in prompt quality has outsized returns when agents run for hours/days
-- **Video rendering optimization example:** Agents achieved 25x perf improvement in Rust video rendering—directly relevant to Tavus's video processing pipeline
+- **Video rendering optimization example:** Agents achieved 25x perf improvement in Rust video rendering—directly relevant to your team's video processing pipeline
 
 ## Open questions
 

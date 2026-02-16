@@ -1,6 +1,6 @@
 # Coding Agent Research
 
-Building the ultimate coding agent for Tavus. Long-running research project.
+Building the ultimate coding agent. Long-running research project.
 
 ## Structure
 - `sources/` — raw notes per source (one file per article/post)
@@ -12,4 +12,4 @@ Building the ultimate coding agent for Tavus. Long-running research project.
 - Nobody has all the answers yet
 - X/Twitter is useful but verify credentials
 - Focus on: what worked, what failed, architectural decisions, eval strategies
-- Always note what's applicable to Tavus's context (AI video, real-time systems)
+- Note practical applications for teams building coding agents

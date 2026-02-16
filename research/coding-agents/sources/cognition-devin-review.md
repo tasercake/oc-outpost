@@ -34,10 +34,10 @@ Cognition built Devin Review, a code review tool that uses AI to intelligently o
 4. **AI review tools fail due to being "spammy and low signal"**: The severity tiering is the key differentiator. Most AI review tools fail because they flag everything equally.
 5. **The agent ecosystem creates its own demand for review tools**: More agent-generated code → more review needed → review agent becomes essential. Self-reinforcing loop.
 
-## Applicable to Tavus
+## Practical Applications
 
-- **Build review into the agent workflow**: If Tavus's agent generates PRs, pair it with review capabilities. The write→review loop is essential for quality.
-- **Diff organization as UX**: If Tavus shows agent-generated code changes to users, organizing diffs logically (not alphabetically) dramatically improves comprehension.
+- **Build review into the agent workflow**: If your team's agent generates PRs, pair it with review capabilities. The write→review loop is essential for quality.
+- **Diff organization as UX**: If your team shows agent-generated code changes to users, organizing diffs logically (not alphabetically) dramatically improves comprehension.
 - **Severity tiering for any AI-generated output**: The Red/Yellow/Gray pattern applies beyond code review—any AI output validation could use confidence-based categorization.
 - **Zero-friction access pattern**: The URL-swap pattern (`github.com` → `devinreview.com`) is a brilliant distribution strategy. Consider similar frictionless entry points.
 - **"Review is the bottleneck" applies to video too**: As AI generates more video content/code, the quality review step becomes the constraint. Invest in review tooling.

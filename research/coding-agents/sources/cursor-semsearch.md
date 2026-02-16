@@ -40,12 +40,12 @@ Cursor trained a custom embedding model using agent session traces as training d
 
 5. **Universal improvement across models** suggests retrieval quality is a bottleneck independent of reasoning capability. Even the best models produce better results with better context.
 
-## Applicable to Tavus
+## Practical Applications
 
-- **Custom embedding model for domain-specific retrieval:** Tavus could train embeddings on video pipeline code patterns, making an agent better at navigating their specific codebase
-- **Agent trace → training data pipeline:** If Tavus builds internal coding agents, logging agent sessions and mining them for retrieval training data is high-ROI
-- **Semantic search for large codebases:** Essential for any codebase with 1K+ files. If Tavus's monorepo is large, this is table stakes.
-- **Code retention as eval metric:** Simple, measurable, meaningful. Tavus could use this to evaluate their coding agent's output quality.
+- **Custom embedding model for domain-specific retrieval:** Your team could train embeddings on video pipeline code patterns, making an agent better at navigating their specific codebase
+- **Agent trace → training data pipeline:** If your team builds internal coding agents, logging agent sessions and mining them for retrieval training data is high-ROI
+- **Semantic search for large codebases:** Essential for any codebase with 1K+ files. If your team's monorepo is large, this is table stakes.
+- **Code retention as eval metric:** Simple, measurable, meaningful. Your team could use this to evaluate their coding agent's output quality.
 - **Grep + semantic search combination:** Don't replace grep, augment it. Both tools serve different retrieval needs.
 - **Evaluation methodology:** Both offline benchmarks (controlled) and online A/B tests (real-world) — good pattern for any AI feature.
 

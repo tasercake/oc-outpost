@@ -334,15 +334,15 @@ What happens when 50 engineers are each running 3-5 agent sessions simultaneousl
 
 ---
 
-## 10. Recommendations for Tavus
+## 10. Recommendations for Teams Building Coding Agents
 
-Tavus: AI video company, real-time conversational video, complex ML pipelines, Python/Rust stack, ~50-100 engineers.
+Context: mid-size engineering org (~50-100 engineers), complex ML pipelines, Python/Rust stack.
 
 ### Start here (Weeks 1-4)
 
 **1. Deploy a background coding agent for well-scoped tasks.** Use Claude Code or OpenCode with a CLAUDE.md/AGENTS.md file that describes your codebase architecture, conventions, and common patterns. Start with: bug fixes from your issue tracker, test coverage expansion, and documentation generation. Track merge rate as your north star metric. Target: >60% merge rate on these scoped tasks.
 
-**2. Build a CI-triggered review agent.** Following Continue's anti-slop pattern and Sourcegraph's Sherlock: on every PR (human or agent-generated), run an automated review agent that checks for Tavus-specific quality standards — video pipeline conventions, API design patterns, security concerns around media processing. This is low-risk, high-signal, and will pay dividends immediately regardless of how much agent-generated code you produce.
+**2. Build a CI-triggered review agent.** Following Continue's anti-slop pattern and Sourcegraph's Sherlock: on every PR (human or agent-generated), run an automated review agent that checks for team-specific quality standards — video pipeline conventions, API design patterns, security concerns around media processing. This is low-risk, high-signal, and will pay dividends immediately regardless of how much agent-generated code you produce.
 
 **3. Write custom linters with agent-readable error messages.** OpenAI's key insight. Your linter errors should say "Use our `VideoEncoder` abstraction, not raw FFmpeg calls. See docs/video-encoding.md for the API." This mechanically enforces conventions without relying on the agent reading documentation.
 
@@ -354,10 +354,10 @@ Tavus: AI video company, real-time conversational video, complex ML pipelines, P
 - Expose video processing metrics (latency, quality scores, resource usage) via queryable interfaces so agents can verify their own work
 - Write init scripts that set up the dev environment automatically
 
-**5. Build domain-specific evaluation.** Adapt Descript's framework: "Don't break things, do what I asked, do it well." For Tavus this means:
+**5. Build domain-specific evaluation.** Adapt Descript's framework: "Don't break things, do what I asked, do it well." For your team this means:
 - **Don't break things:** Existing avatars render correctly, existing API contracts hold, video quality doesn't regress
 - **Do what I asked:** Feature matches specification, tests pass, code compiles
-- **Do it well:** Follows Tavus conventions, performant, no code slop
+- **Do it well:** Follows team conventions, performant, no code slop
 - Start with 20-50 eval tasks from real bugs and feature requests. Use pass^k (not pass@k) because your customers expect consistent quality.
 
 **6. Sandbox with full VM isolation.** Your ML pipelines involve GPU resources, model checkpoints, and likely sensitive training data. Use Modal (like Ramp) or equivalent: each agent session gets a sandboxed VM with your full dev environment (FFmpeg, ML inference runtimes, etc.). Pre-warm images on a 30-minute rebuild cycle. Implement Replit's CoW snapshot pattern if your state management is complex enough to warrant it.
@@ -377,7 +377,7 @@ Tavus: AI video company, real-time conversational video, complex ML pipelines, P
 - **Don't over-invest in prompt engineering at the expense of tooling.** The prompt matters, but the test suite, linters, CI pipeline, and evaluation framework matter more. Build the environment, not the prompt.
 - **Don't let agents touch production without human review** for at least the first 6 months. The Level 4 autonomy (agent-reviewed agent) pattern is viable for low-risk code, but video pipeline code with ML inference, real-time processing, and customer-facing output is high-risk.
 
-### The Tavus-specific opportunity
+### The team-specific opportunity
 
 Your Python/Rust stack is well-suited for agents — both languages are well-represented in training data ("boring tech" advantage per OpenAI). Your video processing pipeline is likely highly modular (encoding, decoding, lip sync, avatar rendering, audio processing) — this natural decomposition maps well to agent task boundaries. And your ML pipeline likely generates many similar tasks (training runs, experiment tracking, data preprocessing) that are perfect for the fleet model.
 
