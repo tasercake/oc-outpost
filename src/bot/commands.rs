@@ -15,10 +15,6 @@ pub enum Command {
     #[command(description = "list all sessions")]
     Sessions,
 
-    /// Connect to existing session
-    #[command(description = "connect to existing session - Usage: /connect <session_id>")]
-    Connect(String),
-
     /// List available projects
     #[command(description = "list available projects")]
     Projects,
@@ -27,14 +23,6 @@ pub enum Command {
     #[command(description = "close topic and clean up")]
     Close,
 
-    /// Link topic to directory
-    #[command(description = "link topic to directory - Usage: /link <directory>")]
-    Link(String),
-
-    /// Toggle streaming
-    #[command(description = "toggle streaming mode")]
-    Stream,
-
     /// Show session info
     #[command(description = "show current session info")]
     Session,
@@ -42,10 +30,6 @@ pub enum Command {
     /// Show orchestrator status
     #[command(description = "show orchestrator status")]
     Status,
-
-    /// Clear stale mappings
-    #[command(description = "clear stale topic mappings")]
-    Clear,
 
     /// Show help
     #[command(description = "display this help text")]
@@ -69,12 +53,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_connect_command() {
-        let cmd = Command::parse("/connect abc123", "bot").unwrap();
-        assert_eq!(cmd, Command::Connect("abc123".to_string()));
-    }
-
-    #[test]
     fn test_parse_close_command() {
         let cmd = Command::parse("/close", "bot").unwrap();
         assert_eq!(cmd, Command::Close);
@@ -84,24 +62,6 @@ mod tests {
     fn test_parse_projects_command() {
         let cmd = Command::parse("/projects", "bot").unwrap();
         assert_eq!(cmd, Command::Projects);
-    }
-
-    #[test]
-    fn test_disconnect_removed() {
-        let result = Command::parse("/disconnect", "bot");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_link_command() {
-        let cmd = Command::parse("/link /path/to/project", "bot").unwrap();
-        assert_eq!(cmd, Command::Link("/path/to/project".to_string()));
-    }
-
-    #[test]
-    fn test_parse_stream_command() {
-        let cmd = Command::parse("/stream", "bot").unwrap();
-        assert_eq!(cmd, Command::Stream);
     }
 
     #[test]
@@ -117,12 +77,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_clear_command() {
-        let cmd = Command::parse("/clear", "bot").unwrap();
-        assert_eq!(cmd, Command::Clear);
-    }
-
-    #[test]
     fn test_parse_help_command() {
         let cmd = Command::parse("/help", "bot").unwrap();
         assert_eq!(cmd, Command::Help);
@@ -133,7 +87,6 @@ mod tests {
         let descriptions = Command::descriptions();
         assert!(descriptions.to_string().contains("create new project"));
         assert!(descriptions.to_string().contains("list all sessions"));
-        assert!(descriptions.to_string().contains("toggle streaming"));
         assert!(descriptions.to_string().contains("list available projects"));
         assert!(descriptions
             .to_string()
