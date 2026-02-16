@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionInfo {
@@ -13,15 +14,31 @@ pub struct SessionInfo {
 #[serde(rename_all = "snake_case")]
 pub enum MessagePart {
     Text { text: String },
-    Image { source: ImageSource },
+    File(FilePart),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
-#[serde(rename_all = "snake_case")]
-pub enum ImageSource {
-    Url { url: String },
-    Base64 { media_type: String, data: String },
+pub struct FilePart {
+    #[serde(rename = "type")]
+    pub part_type: String,
+    pub mime: String,
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+}
+
+impl FilePart {
+    pub fn new(mime: &str, file_path: &Path) -> Self {
+        Self {
+            part_type: "file".to_string(),
+            mime: mime.to_string(),
+            url: format!("file://{}", file_path.display()),
+            filename: file_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(String::from),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -85,47 +102,13 @@ mod tests {
     }
 
     #[test]
-    fn test_message_part_image_url() {
-        let json = r#"{
-            "type": "image",
-            "source": {
-                "type": "url",
-                "url": "https://example.com/image.png"
-            }
-        }"#;
-
-        let part: MessagePart = serde_json::from_str(json).unwrap();
-        match part {
-            MessagePart::Image { source } => match source {
-                ImageSource::Url { url } => assert_eq!(url, "https://example.com/image.png"),
-                _ => panic!("Expected Url variant"),
-            },
-            _ => panic!("Expected Image variant"),
-        }
-    }
-
-    #[test]
-    fn test_message_part_image_base64() {
-        let json = r#"{
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": "image/png",
-                "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
-            }
-        }"#;
-
-        let part: MessagePart = serde_json::from_str(json).unwrap();
-        match part {
-            MessagePart::Image { source } => match source {
-                ImageSource::Base64 { media_type, data } => {
-                    assert_eq!(media_type, "image/png");
-                    assert!(!data.is_empty());
-                }
-                _ => panic!("Expected Base64 variant"),
-            },
-            _ => panic!("Expected Image variant"),
-        }
+    fn test_file_part_serialization() {
+        let file_part = FilePart::new("image/jpeg", Path::new("/tmp/test.jpg"));
+        let json = serde_json::to_string(&file_part).unwrap();
+        assert!(json.contains(r#""type":"file""#));
+        assert!(json.contains(r#""mime":"image/jpeg""#));
+        assert!(json.contains(r#""url":"file:///tmp/test.jpg""#));
+        assert!(json.contains(r#""filename":"test.jpg""#));
     }
 
     #[test]
