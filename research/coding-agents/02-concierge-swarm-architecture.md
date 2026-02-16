@@ -286,10 +286,9 @@ User message → Concierge acknowledges (~200ms)
 
 ### Optimizations
 
-1. **Warm on keystroke** (Ramp): Pre-provision worker slots when the user starts typing
-2. **Concurrent decomposition**: Manager starts decomposing while concierge acknowledges
-3. **Speculative workers**: For common task patterns, spawn likely workers before decomposition completes
-4. **Worker pool**: Keep N warm workers with base codebase context loaded, assign tasks on demand
+1. **Concurrent decomposition**: Manager starts decomposing while concierge acknowledges
+2. **Speculative workers**: For common task patterns, spawn likely workers before decomposition completes
+3. **Worker pool**: Keep N warm workers with base codebase context loaded, assign tasks on demand
 
 ## 11. Open Questions
 
@@ -312,7 +311,63 @@ User message → Concierge acknowledges (~200ms)
 | Continue IDE/Cloud split | Concierge ≈ IDE agent, Workers ≈ Cloud agents |
 | Blackboard systems (classic CS) | Queue ≈ blackboard, Manager ≈ control unit, Workers ≈ knowledge sources |
 
-## 13. Recommended Implementation Order
+## 13. Critical Counterpoints
+
+An honest assessment of where this architecture may be wrong, over-engineered, or solving the wrong problems. These should be treated as hypotheses to test, not reasons to abandon the design.
+
+### 13.1 Solving for the wrong bottleneck
+
+The research consensus is overwhelming: **harness > model, tests > harness, linters > prompts.** The highest-ROI investments are custom linters with agent-readable errors (OpenAI), domain-specific evals (Descript), and hybrid retrieval for context (Sourcegraph, Cursor). None of these require multi-agent coordination. This architecture invests heavily in agent coordination (queue semantics, activation tiers, streaming observation, conflict resolution) when the evidence says tool quality dominates.
+
+**Hypothesis to test:** A single well-scaffolded agent with great tools achieves ≥80% of the quality of a multi-agent swarm on realistic coding tasks.
+
+### 13.2 No production system has needed this level of complexity
+
+Cursor (the most ambitious multi-agent coding system in production) converged on planner/worker hierarchy — no message queue. Anthropic built 100K lines of Rust with 16 flat agents and git coordination — no message passing. Cognition explicitly advises "Don't Build Multi-Agents." This architecture is more complex than any of them. The burden of proof is on us to show the complexity pays for itself.
+
+**Hypothesis to test:** There exists a class of coding tasks where planner/worker hierarchy demonstrably fails and queue-based coordination succeeds.
+
+### 13.3 The concierge is a presentation layer, not an architectural primitive
+
+The concierge is the most novel component, but its core job is making the user feel attended to while work happens. This is a UX concern, not a systems concern. 90% of its value could be achieved by having the manager emit structured status events and a lightweight (non-LLM) process format them for the user. The streaming observation idea (reading other agents' token streams) is genuinely novel but the implementation complexity is enormous relative to the payoff (slightly faster status updates).
+
+**Hypothesis to test:** A non-LLM status formatter over structured manager events produces equivalent user satisfaction to a dedicated concierge agent.
+
+### 13.4 The queue is a liability disguised as a feature
+
+Even with the hybrid filtered queue mitigating O(N×M²) costs, we're still building a custom distributed messaging system for LLM agents. This is an entire infrastructure category. Every successful production system uses the simplest coordination mechanism that works: git (Anthropic), structured handoffs (Cursor), shared prompt context (Pipecat EPIC). The question isn't whether a queue *can* coordinate agents — it's whether agents actually need real-time coordination for most coding tasks. The research says most tasks decompose into independent chunks.
+
+**Hypothesis to test:** For >90% of real coding tasks, agents don't need to communicate mid-execution. Results can be composed after independent completion.
+
+### 13.5 The manager is a planner with extra features nobody asked for
+
+After three-tier activation handles most routing deterministically, the manager's unique contributions are: task decomposition, worker spawning, selective agent introduction, and conflict arbitration. The first two are what a planner does. The latter two are features in search of a problem — no production system has demonstrated a need for runtime agent introduction or dynamic topology awareness.
+
+**Hypothesis to test:** Static task decomposition at planning time (Cursor-style) produces equivalent outcomes to dynamic manager steering during execution.
+
+### 13.6 Recursive sub-agents are a complexity bomb
+
+Workers spawning sub-agents that spawn sub-sub-agents, disconnected from the central queue, creates invisible work the manager and concierge can't observe. Cursor found 2 levels is the practical maximum before coordination overhead exceeds value. Supporting arbitrary depth adds implementation complexity without evidence it helps.
+
+**Hypothesis to test:** Depth-2 sub-agents (worker → sub-agent, no deeper) cover all practical use cases. Deeper recursion adds cost without quality improvement.
+
+### 13.7 Conflict resolution is unsolved, not deferred
+
+Three approaches are listed (git-level, agent-detected, manager-arbitrated) but none are proven. This isn't a minor detail — conflict resolution is the reason multi-agent coding systems fail at scale. Cursor's flat coordination "catastrophically failed" at 20 agents due to contention. Semantic conflicts (contradictory architectural decisions) are harder than syntactic merge conflicts and no team has solved them.
+
+**Hypothesis to test:** Manager-arbitrated conflict resolution produces correct outcomes >80% of the time on deliberately conflicting agent outputs.
+
+### 13.8 No eval story
+
+This design doc has no section on evaluation. How do we measure whether the manager's decomposition is good? Whether three-tier activation routes correctly? Whether the concierge's reporting is accurate? Whether the swarm outperforms a single agent? Every successful team in the research built evals *before* building the system (eval-driven development). Without baselines and metrics, we can't distinguish signal from noise.
+
+### 13.9 Top-down vs bottom-up
+
+This architecture is a top-down design from first principles and research synthesis. Every successful production coding agent was built bottom-up through iterative failure. Cursor went through 5+ architecture iterations. Anthropic discovered flat coordination by trying it. Cognition's "don't build multi-agents" came from building them. The risk is designing for hypothetical problems instead of observed ones.
+
+**Recommended approach:** Build the simplest system that solves a real problem (single agent + tools). Add complexity only when we have empirical evidence that the current system's limitations match the problems this architecture solves.
+
+## 14. Recommended Implementation Order
 
 1. **MVP**: Manager + 1 worker + concierge. Flat queue. No filtering. Prove the interaction model works.
 2. **Add workers**: Dynamic spawning, recursive sub-agents. Discover where coordination breaks down.
