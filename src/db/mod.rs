@@ -23,6 +23,22 @@ pub async fn init_orchestrator_db(db_path: &Path) -> Result<SqlitePool> {
     let migration_004 = include_str!("../../migrations/004_add_container_id.sql");
     let _ = sqlx::query(migration_004).execute(&pool).await;
 
+    let migration_005 = include_str!("../../migrations/005_remove_dead_columns.sql");
+    let _ = sqlx::query(migration_005).execute(&pool).await;
+
+    let migration_007 = include_str!("../../migrations/007_add_topic_id_to_instances.sql");
+    for statement in migration_007.split(';') {
+        let stmt: String = statement
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("--"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let stmt = stmt.trim();
+        if !stmt.is_empty() {
+            let _ = sqlx::query(stmt).execute(&pool).await;
+        }
+    }
+
     Ok(pool)
 }
 
@@ -64,6 +80,12 @@ pub async fn init_topics_db(db_path: &Path) -> Result<SqlitePool> {
     let migration = include_str!("../../migrations/002_create_topic_mappings_table.sql");
     sqlx::query(migration).execute(&pool).await?;
 
+    let migration_005 = include_str!("../../migrations/005_remove_dead_columns.sql");
+    let _ = sqlx::query(migration_005).execute(&pool).await;
+
+    let migration_006 = include_str!("../../migrations/006_composite_topic_pk.sql");
+    let _ = sqlx::query(migration_006).execute(&pool).await;
+
     Ok(pool)
 }
 
@@ -98,8 +120,8 @@ mod tests {
 
         // Verify instances table exists with correct schema
         let result = sqlx::query(
-            "SELECT id, project_path, port, state, instance_type, session_id, created_at, updated_at 
-             FROM instances LIMIT 0"
+            "SELECT id, project_path, port, state, session_id, container_id, topic_id, created_at, updated_at 
+             FROM instances LIMIT 0",
         )
         .fetch_optional(&pool)
         .await;
@@ -201,8 +223,8 @@ mod tests {
 
         // Verify topic_mappings table exists with correct schema
         let result = sqlx::query(
-            "SELECT topic_id, chat_id, project_path, session_id, instance_id, 
-                    streaming_enabled, topic_name_updated, created_at, updated_at 
+            "SELECT chat_id, topic_id, project_path, session_id, instance_id, 
+                    topic_name_updated, created_at, updated_at 
              FROM topic_mappings LIMIT 0",
         )
         .fetch_optional(&pool)
@@ -305,18 +327,13 @@ mod tests {
         .unwrap();
 
         // Verify defaults were applied
-        let (streaming_enabled, topic_name_updated): (i32, i32) = sqlx::query_as(
-            "SELECT streaming_enabled, topic_name_updated FROM topic_mappings WHERE topic_id = ?",
-        )
-        .bind(12345)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let (topic_name_updated,): (i32,) =
+            sqlx::query_as("SELECT topic_name_updated FROM topic_mappings WHERE topic_id = ?")
+                .bind(12345)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
 
-        assert_eq!(
-            streaming_enabled, 1,
-            "streaming_enabled should default to 1"
-        );
         assert_eq!(
             topic_name_updated, 0,
             "topic_name_updated should default to 0"
