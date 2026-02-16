@@ -1,6 +1,6 @@
 # AGENTS.md - oc-outpost
 
-Telegram bot (Rust) that orchestrates multiple Claude Code instances through forum topics.
+Telegram bot (Rust) that orchestrates multiple OpenCode instances through forum topics.
 Tech stack: teloxide, tokio, sqlx (SQLite), axum, reqwest, serde, anyhow/thiserror, bollard (Docker).
 
 **WARNING**: This codebase was put together quickly. Many existing patterns are antipatterns.
@@ -35,11 +35,11 @@ Clippy treats warnings as errors. Always run `just check` before submitting.
 src/
   main.rs              # Entry point, teloxide dispatcher setup
   config.rs            # Config from env vars (dotenvy)
-  integration.rs       # Wires bot <-> Claude Code (message routing, streaming)
+  integration.rs       # Wires bot <-> OpenCode (message routing, streaming)
   bot/                 # Telegram bot: commands, handlers/, state
   orchestrator/        # Instance lifecycle: manager, store, port_pool, container
-  Claude/            # Claude Code API client, discovery, stream_handler
-  types/               # Shared types: error, instance, forum, Claude
+  opencode/            # OpenCode API client, discovery, stream_handler
+  types/               # Shared types: error, instance, forum, Opencode
   db/                  # Database init, log_store, tracing_layer
   api/                 # External HTTP API (axum)
   forum/               # Topic store
@@ -122,7 +122,7 @@ Uses `tracing` with structured fields.
 **Rules:**
 - Use `#[instrument]` on handler/service boundaries for span correlation, but default to `skip_all` and explicitly whitelist safe fields (IDs, counts, state). Don't add "entered function" `debug!` logs — either use a span or log a meaningful state change.
 - Log mutations (create/update/delete) at `info` with entity IDs. Log reads at `trace` or not at all.
-- Never log Telegram message text, Claude Code prompt content, request/response bodies, or credentials/tokens. Prefer allowlisting: log IDs/metadata only. Consider type-wrapping secrets (e.g., `secrecy`) so accidental `Debug` doesn't leak.
+- Never log Telegram message text, OpenCode prompt content, request/response bodies, or credentials/tokens. Prefer allowlisting: log IDs/metadata only. Consider type-wrapping secrets (e.g., `secrecy`) so accidental `Debug` doesn't leak.
 - `warn!` for expected operational issues; `error!` for genuine failures needing investigation.
 - The DB tracing layer (`src/db/tracing_layer.rs`) spawns an async insert per event (unbounded, no backpressure) and silently drops insertion errors. Treat as a dev/diagnostic feature unless you add filtering/sampling and a bounded ingestion path.
 
