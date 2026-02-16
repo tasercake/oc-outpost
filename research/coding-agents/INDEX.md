@@ -84,3 +84,4 @@
 - 🟢 [Malte Ubl: Vercel Agent code review architecture](https://x.com/cramforce/status/1970222579026927946) — CTO insight: agent sees entire repo, not just diff
 - 🟢 [Andrew Ng: Agentic testing priorities](https://x.com/AndrewYNg/status/1968710001079501303) — Prioritize where to test; skip front-end, focus on backend
 - 🟢 [Pat Grady: RL vs Agent Harnesses](https://x.com/gradypb/status/2011491957730918510) — Two competing paradigms for long-running agents
+- 🟢 [Pipecat EPIC Pattern](https://x.com/kwindla/status/2022087764720988296) — Two independent agents (voice + UI) coordinate via shared context and prompt-level awareness. Intent registration as coordination primitive.
