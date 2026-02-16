@@ -22,14 +22,12 @@ impl TopicStore {
         sqlx::query(
             "INSERT INTO topic_mappings 
              (topic_id, chat_id, project_path, session_id, instance_id, 
-              streaming_enabled, topic_name_updated, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(topic_id) DO UPDATE SET
-                chat_id = excluded.chat_id,
+              topic_name_updated, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(chat_id, topic_id) DO UPDATE SET
                 project_path = excluded.project_path,
                 session_id = excluded.session_id,
                 instance_id = excluded.instance_id,
-                streaming_enabled = excluded.streaming_enabled,
                 topic_name_updated = excluded.topic_name_updated,
                 updated_at = excluded.updated_at",
         )
@@ -38,7 +36,6 @@ impl TopicStore {
         .bind(&mapping.project_path)
         .bind(&mapping.session_id)
         .bind(&mapping.instance_id)
-        .bind(if mapping.streaming_enabled { 1 } else { 0 })
         .bind(if mapping.topic_name_updated { 1 } else { 0 })
         .bind(mapping.created_at)
         .bind(mapping.updated_at)
@@ -48,13 +45,18 @@ impl TopicStore {
         Ok(())
     }
 
-    pub async fn get_mapping(&self, topic_id: i32) -> Result<Option<TopicMapping>> {
-        debug!(topic_id = topic_id, "Looking up topic mapping");
+    pub async fn get_mapping(&self, chat_id: i64, topic_id: i32) -> Result<Option<TopicMapping>> {
+        debug!(
+            chat_id = chat_id,
+            topic_id = topic_id,
+            "Looking up topic mapping"
+        );
         let row = sqlx::query(
             "SELECT topic_id, chat_id, project_path, session_id, instance_id,
-                    streaming_enabled, topic_name_updated, created_at, updated_at
-             FROM topic_mappings WHERE topic_id = ?",
+                    topic_name_updated, created_at, updated_at
+             FROM topic_mappings WHERE chat_id = ? AND topic_id = ?",
         )
+        .bind(chat_id)
         .bind(topic_id)
         .fetch_optional(&self.pool)
         .await?;
@@ -66,14 +68,14 @@ impl TopicStore {
                 project_path: row.get(2),
                 session_id: row.get(3),
                 instance_id: row.get(4),
-                streaming_enabled: row.get::<i32, _>(5) != 0,
-                topic_name_updated: row.get::<i32, _>(6) != 0,
-                created_at: row.get(7),
-                updated_at: row.get(8),
+                topic_name_updated: row.get::<i32, _>(5) != 0,
+                created_at: row.get(6),
+                updated_at: row.get(7),
             })),
             None => Ok(None),
         };
         debug!(
+            chat_id = chat_id,
             topic_id = topic_id,
             found = result.is_ok() && result.as_ref().unwrap().is_some(),
             "Topic mapping lookup result"
@@ -81,11 +83,12 @@ impl TopicStore {
         result
     }
 
+    #[allow(dead_code)]
     pub async fn get_mappings_by_chat(&self, chat_id: i64) -> Result<Vec<TopicMapping>> {
         debug!(chat_id = chat_id, "Looking up mappings by chat");
         let rows = sqlx::query(
             "SELECT topic_id, chat_id, project_path, session_id, instance_id,
-                    streaming_enabled, topic_name_updated, created_at, updated_at
+                    topic_name_updated, created_at, updated_at
              FROM topic_mappings WHERE chat_id = ?",
         )
         .bind(chat_id)
@@ -100,10 +103,9 @@ impl TopicStore {
                 project_path: row.get(2),
                 session_id: row.get(3),
                 instance_id: row.get(4),
-                streaming_enabled: row.get::<i32, _>(5) != 0,
-                topic_name_updated: row.get::<i32, _>(6) != 0,
-                created_at: row.get(7),
-                updated_at: row.get(8),
+                topic_name_updated: row.get::<i32, _>(5) != 0,
+                created_at: row.get(6),
+                updated_at: row.get(7),
             })
             .collect();
 
@@ -115,11 +117,12 @@ impl TopicStore {
         Ok(mappings)
     }
 
+    #[allow(dead_code)]
     pub async fn get_all_mappings(&self) -> Result<Vec<TopicMapping>> {
         debug!("Looking up all mappings");
         let rows = sqlx::query(
             "SELECT topic_id, chat_id, project_path, session_id, instance_id,
-                    streaming_enabled, topic_name_updated, created_at, updated_at
+                    topic_name_updated, created_at, updated_at
              FROM topic_mappings",
         )
         .fetch_all(&self.pool)
@@ -133,10 +136,9 @@ impl TopicStore {
                 project_path: row.get(2),
                 session_id: row.get(3),
                 instance_id: row.get(4),
-                streaming_enabled: row.get::<i32, _>(5) != 0,
-                topic_name_updated: row.get::<i32, _>(6) != 0,
-                created_at: row.get(7),
-                updated_at: row.get(8),
+                topic_name_updated: row.get::<i32, _>(5) != 0,
+                created_at: row.get(6),
+                updated_at: row.get(7),
             })
             .collect();
 
@@ -148,7 +150,7 @@ impl TopicStore {
         debug!(session_id = %session_id, "Looking up mapping by session");
         let row = sqlx::query(
             "SELECT topic_id, chat_id, project_path, session_id, instance_id,
-                    streaming_enabled, topic_name_updated, created_at, updated_at
+                    topic_name_updated, created_at, updated_at
              FROM topic_mappings WHERE session_id = ?",
         )
         .bind(session_id)
@@ -162,10 +164,9 @@ impl TopicStore {
                 project_path: row.get(2),
                 session_id: row.get(3),
                 instance_id: row.get(4),
-                streaming_enabled: row.get::<i32, _>(5) != 0,
-                topic_name_updated: row.get::<i32, _>(6) != 0,
-                created_at: row.get(7),
-                updated_at: row.get(8),
+                topic_name_updated: row.get::<i32, _>(5) != 0,
+                created_at: row.get(6),
+                updated_at: row.get(7),
             })),
             None => Ok(None),
         }
@@ -173,81 +174,76 @@ impl TopicStore {
 
     #[allow(dead_code)]
     // Used by future: session update feature
-    pub async fn update_session(&self, topic_id: i32, session_id: &str) -> Result<()> {
-        debug!(topic_id = topic_id, session_id = %session_id, "Updating session_id in mapping");
+    pub async fn update_session(
+        &self,
+        chat_id: i64,
+        topic_id: i32,
+        session_id: &str,
+    ) -> Result<()> {
+        debug!(chat_id = chat_id, topic_id = topic_id, session_id = %session_id, "Updating session_id in mapping");
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs() as i64;
 
         let result = sqlx::query(
-            "UPDATE topic_mappings SET session_id = ?, updated_at = ? WHERE topic_id = ?",
+            "UPDATE topic_mappings SET session_id = ?, updated_at = ? WHERE chat_id = ? AND topic_id = ?",
         )
         .bind(session_id)
         .bind(now)
+        .bind(chat_id)
         .bind(topic_id)
         .execute(&self.pool)
         .await?;
 
         if result.rows_affected() == 0 {
-            return Err(anyhow!("Mapping not found for topic_id {}", topic_id));
+            return Err(anyhow!(
+                "Mapping not found for chat_id {} topic_id {}",
+                chat_id,
+                topic_id
+            ));
         }
 
         Ok(())
     }
 
-    pub async fn toggle_streaming(&self, topic_id: i32) -> Result<bool> {
-        debug!(topic_id = topic_id, "Toggling streaming state");
-        let current = self
-            .get_mapping(topic_id)
-            .await?
-            .ok_or_else(|| anyhow!("Mapping not found for topic_id {}", topic_id))?;
-
-        let new_value = !current.streaming_enabled;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs() as i64;
-
-        sqlx::query(
-            "UPDATE topic_mappings SET streaming_enabled = ?, updated_at = ? WHERE topic_id = ?",
-        )
-        .bind(if new_value { 1 } else { 0 })
-        .bind(now)
-        .bind(topic_id)
-        .execute(&self.pool)
-        .await?;
-
+    pub async fn mark_topic_name_updated(&self, chat_id: i64, topic_id: i32) -> Result<()> {
         debug!(
+            chat_id = chat_id,
             topic_id = topic_id,
-            new_state = new_value,
-            "Streaming toggled"
+            "Marking topic name as updated"
         );
-        Ok(new_value)
-    }
-
-    pub async fn mark_topic_name_updated(&self, topic_id: i32) -> Result<()> {
-        debug!(topic_id = topic_id, "Marking topic name as updated");
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs() as i64;
 
         let result = sqlx::query(
-            "UPDATE topic_mappings SET topic_name_updated = 1, updated_at = ? WHERE topic_id = ?",
+            "UPDATE topic_mappings SET topic_name_updated = 1, updated_at = ? WHERE chat_id = ? AND topic_id = ?",
         )
         .bind(now)
+        .bind(chat_id)
         .bind(topic_id)
         .execute(&self.pool)
         .await?;
 
         if result.rows_affected() == 0 {
-            return Err(anyhow!("Mapping not found for topic_id {}", topic_id));
+            return Err(anyhow!(
+                "Mapping not found for chat_id {} topic_id {}",
+                chat_id,
+                topic_id
+            ));
         }
 
         Ok(())
     }
 
-    pub async fn delete_mapping(&self, topic_id: i32) -> Result<()> {
-        debug!(topic_id = topic_id, "Deleting topic mapping");
-        sqlx::query("DELETE FROM topic_mappings WHERE topic_id = ?")
+    pub async fn delete_mapping(&self, chat_id: i64, topic_id: i32) -> Result<()> {
+        debug!(
+            chat_id = chat_id,
+            topic_id = topic_id,
+            "Deleting topic mapping"
+        );
+        sqlx::query("DELETE FROM topic_mappings WHERE chat_id = ? AND topic_id = ?")
+            .bind(chat_id)
             .bind(topic_id)
             .execute(&self.pool)
             .await?;
@@ -267,7 +263,7 @@ impl TopicStore {
 
         let rows = sqlx::query(
             "SELECT topic_id, chat_id, project_path, session_id, instance_id,
-                    streaming_enabled, topic_name_updated, created_at, updated_at
+                    topic_name_updated, created_at, updated_at
              FROM topic_mappings WHERE updated_at < ?",
         )
         .bind(threshold)
@@ -282,10 +278,9 @@ impl TopicStore {
                 project_path: row.get(2),
                 session_id: row.get(3),
                 instance_id: row.get(4),
-                streaming_enabled: row.get::<i32, _>(5) != 0,
-                topic_name_updated: row.get::<i32, _>(6) != 0,
-                created_at: row.get(7),
-                updated_at: row.get(8),
+                topic_name_updated: row.get::<i32, _>(5) != 0,
+                created_at: row.get(6),
+                updated_at: row.get(7),
             })
             .collect();
 
@@ -311,7 +306,7 @@ mod tests {
             project_path: "/test/project".to_string(),
             session_id: None,
             instance_id: None,
-            streaming_enabled: true,
+
             topic_name_updated: false,
             created_at: now,
             updated_at: now,
@@ -339,7 +334,7 @@ mod tests {
         store.save_mapping(&mapping).await.unwrap();
 
         // Verify mapping was saved
-        let retrieved = store.get_mapping(123).await.unwrap();
+        let retrieved = store.get_mapping(-1001234567890, 123).await.unwrap();
         assert!(retrieved.is_some());
         let retrieved = retrieved.unwrap();
         assert_eq!(retrieved.topic_id, 123);
@@ -361,7 +356,11 @@ mod tests {
         store.save_mapping(&mapping).await.unwrap();
 
         // Verify mapping was updated
-        let retrieved = store.get_mapping(456).await.unwrap().unwrap();
+        let retrieved = store
+            .get_mapping(-1009876543210, 456)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(retrieved.project_path, "/updated/path");
         assert_eq!(retrieved.session_id, Some("session-123".to_string()));
     }
@@ -372,7 +371,7 @@ mod tests {
         let db_path = temp_dir.path().join("topics.db");
         let store = TopicStore::new(&db_path).await.unwrap();
 
-        let result = store.get_mapping(999).await.unwrap();
+        let result = store.get_mapping(-1009999999999, 999).await.unwrap();
         assert!(result.is_none());
     }
 
@@ -441,9 +440,16 @@ mod tests {
         let mapping = create_test_mapping(555, -1004444444444);
         store.save_mapping(&mapping).await.unwrap();
 
-        store.update_session(555, "new-session-id").await.unwrap();
+        store
+            .update_session(-1004444444444, 555, "new-session-id")
+            .await
+            .unwrap();
 
-        let retrieved = store.get_mapping(555).await.unwrap().unwrap();
+        let retrieved = store
+            .get_mapping(-1004444444444, 555)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(retrieved.session_id, Some("new-session-id".to_string()));
     }
 
@@ -453,43 +459,9 @@ mod tests {
         let db_path = temp_dir.path().join("topics.db");
         let store = TopicStore::new(&db_path).await.unwrap();
 
-        let result = store.update_session(999, "session-id").await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_toggle_streaming_flips_boolean() {
-        let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join("topics.db");
-        let store = TopicStore::new(&db_path).await.unwrap();
-
-        let mut mapping = create_test_mapping(666, -1005555555555);
-        mapping.streaming_enabled = true;
-        store.save_mapping(&mapping).await.unwrap();
-
-        // Toggle to false
-        let new_value = store.toggle_streaming(666).await.unwrap();
-        assert!(!new_value);
-
-        // Verify it was persisted
-        let retrieved = store.get_mapping(666).await.unwrap().unwrap();
-        assert!(!retrieved.streaming_enabled);
-
-        // Toggle back to true
-        let new_value = store.toggle_streaming(666).await.unwrap();
-        assert!(new_value);
-
-        let retrieved = store.get_mapping(666).await.unwrap().unwrap();
-        assert!(retrieved.streaming_enabled);
-    }
-
-    #[tokio::test]
-    async fn test_toggle_streaming_fails_for_nonexistent_mapping() {
-        let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join("topics.db");
-        let store = TopicStore::new(&db_path).await.unwrap();
-
-        let result = store.toggle_streaming(999).await;
+        let result = store
+            .update_session(-1009999999999, 999, "session-id")
+            .await;
         assert!(result.is_err());
     }
 
@@ -503,9 +475,16 @@ mod tests {
         mapping.topic_name_updated = false;
         store.save_mapping(&mapping).await.unwrap();
 
-        store.mark_topic_name_updated(777).await.unwrap();
+        store
+            .mark_topic_name_updated(-1006666666666, 777)
+            .await
+            .unwrap();
 
-        let retrieved = store.get_mapping(777).await.unwrap().unwrap();
+        let retrieved = store
+            .get_mapping(-1006666666666, 777)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(retrieved.topic_name_updated);
     }
 
@@ -515,7 +494,7 @@ mod tests {
         let db_path = temp_dir.path().join("topics.db");
         let store = TopicStore::new(&db_path).await.unwrap();
 
-        let result = store.mark_topic_name_updated(999).await;
+        let result = store.mark_topic_name_updated(-1009999999999, 999).await;
         assert!(result.is_err());
     }
 
@@ -528,9 +507,9 @@ mod tests {
         let mapping = create_test_mapping(888, -1007777777777);
         store.save_mapping(&mapping).await.unwrap();
 
-        store.delete_mapping(888).await.unwrap();
+        store.delete_mapping(-1007777777777, 888).await.unwrap();
 
-        let result = store.get_mapping(888).await.unwrap();
+        let result = store.get_mapping(-1007777777777, 888).await.unwrap();
         assert!(result.is_none());
     }
 
@@ -541,7 +520,7 @@ mod tests {
         let store = TopicStore::new(&db_path).await.unwrap();
 
         // Should not error even if mapping doesn't exist
-        let result = store.delete_mapping(999).await;
+        let result = store.delete_mapping(-1009999999999, 999).await;
         assert!(result.is_ok());
     }
 
@@ -608,7 +587,7 @@ mod tests {
         // Second connection
         {
             let store = TopicStore::new(&db_path).await.unwrap();
-            let retrieved = store.get_mapping(444).await.unwrap();
+            let retrieved = store.get_mapping(-1001010101010, 444).await.unwrap();
             assert!(retrieved.is_some());
             assert_eq!(retrieved.unwrap().topic_id, 444);
         }
@@ -621,12 +600,16 @@ mod tests {
         let store = TopicStore::new(&db_path).await.unwrap();
 
         let mut mapping = create_test_mapping(555, -1001111111111);
-        mapping.streaming_enabled = false;
+
         mapping.topic_name_updated = true;
         store.save_mapping(&mapping).await.unwrap();
 
-        let retrieved = store.get_mapping(555).await.unwrap().unwrap();
-        assert!(!retrieved.streaming_enabled);
+        let retrieved = store
+            .get_mapping(-1001111111111, 555)
+            .await
+            .unwrap()
+            .unwrap();
+
         assert!(retrieved.topic_name_updated);
     }
 }

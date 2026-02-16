@@ -6,9 +6,6 @@ use sqlx::Row;
 use std::path::Path;
 use tracing::debug;
 
-#[cfg(test)]
-use crate::types::instance::InstanceType;
-
 #[derive(Clone)]
 pub struct OrchestratorStore {
     pool: SqlitePool,
@@ -49,16 +46,16 @@ impl OrchestratorStore {
 
         sqlx::query(
             "INSERT OR REPLACE INTO instances 
-              (id, project_path, port, state, instance_type, session_id, container_id, created_at, updated_at)
+              (id, project_path, port, state, session_id, container_id, topic_id, created_at, updated_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&instance.id)
         .bind(&instance.project_path)
         .bind(instance.port as i64)
         .bind(serde_json::to_string(&instance.state)?)
-        .bind(serde_json::to_string(&instance.instance_type)?)
         .bind(session_id)
         .bind(&instance.container_id)
+        .bind(instance.topic_id)
         .bind(created_at)
         .bind(now)
         .execute(&self.pool)
@@ -167,6 +164,7 @@ impl OrchestratorStore {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn delete_instance(&self, id: &str) -> Result<()> {
         debug!(instance_id = %id, "Deleting instance from DB");
 
@@ -200,17 +198,16 @@ impl OrchestratorStore {
         use sqlx::Column;
 
         let state_str: String = row.get("state");
-        let type_str: String = row.get("instance_type");
         let port: i64 = row.get("port");
 
         let has_container_id = row.columns().iter().any(|c| c.name() == "container_id");
+        let has_topic_id = row.columns().iter().any(|c| c.name() == "topic_id");
 
         Ok(InstanceInfo {
             id: row.get("id"),
             project_path: row.get("project_path"),
             port: port as u16,
             state: serde_json::from_str(&state_str)?,
-            instance_type: serde_json::from_str(&type_str)?,
             pid: None,
             container_id: if has_container_id {
                 row.try_get("container_id").ok().flatten()
@@ -219,6 +216,11 @@ impl OrchestratorStore {
             },
             started_at: None,
             stopped_at: None,
+            topic_id: if has_topic_id {
+                row.try_get("topic_id").unwrap_or(0)
+            } else {
+                0
+            },
         })
     }
 }
@@ -234,11 +236,11 @@ mod tests {
             project_path: path.to_string(),
             port,
             state: InstanceState::Running,
-            instance_type: InstanceType::Managed,
             pid: None,
             container_id: None,
             started_at: None,
             stopped_at: None,
+            topic_id: 123,
         }
     }
 
@@ -554,52 +556,6 @@ mod tests {
 
         let instances = store.get_all_instances().await.unwrap();
         assert_eq!(instances.len(), 10);
-    }
-
-    #[tokio::test]
-    async fn test_save_preserves_all_instance_types() {
-        let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-        let store = OrchestratorStore::new(&db_path).await.unwrap();
-
-        let types = [
-            InstanceType::Managed,
-            InstanceType::Discovered,
-            InstanceType::External,
-        ];
-
-        for (i, instance_type) in types.iter().enumerate() {
-            let mut instance = create_test_instance(
-                &format!("test-{}", i),
-                4100 + i as u16,
-                &format!("/test/path{}", i),
-            );
-            instance.instance_type = instance_type.clone();
-            store
-                .save_instance(&instance, Some(&format!("ses_{}", i)))
-                .await
-                .unwrap();
-        }
-
-        let instances = store.get_all_instances().await.unwrap();
-        assert_eq!(instances.len(), 3);
-
-        let managed_count = instances
-            .iter()
-            .filter(|i| i.instance_type == InstanceType::Managed)
-            .count();
-        let discovered_count = instances
-            .iter()
-            .filter(|i| i.instance_type == InstanceType::Discovered)
-            .count();
-        let external_count = instances
-            .iter()
-            .filter(|i| i.instance_type == InstanceType::External)
-            .count();
-
-        assert_eq!(managed_count, 1);
-        assert_eq!(discovered_count, 1);
-        assert_eq!(external_count, 1);
     }
 
     #[tokio::test]
