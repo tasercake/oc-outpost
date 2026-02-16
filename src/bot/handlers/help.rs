@@ -13,19 +13,15 @@ use tracing::debug;
 /// Format help text for General topic (all commands).
 fn format_general_help() -> String {
     "OpenCode Telegram Bot\n\n\
-     General Commands:\n\
-     /new <name> - Create new project\n\
-     /sessions - List all sessions\n\
-     /connect <name> - Connect to session\n\
+     Commands:\n\
+     /new <name> - Create new project topic\n\
+     /sessions - List active sessions\n\
      /projects - List available projects\n\
-     /status - Orchestrator status\n\
-     /clear - Clean stale mappings\n\
+     /status - Show bot status\n\
      /help - This help\n\n\
      In a topic:\n\
      /session - Show session info\n\
-     /link <path> - Link to directory\n\
-     /stream - Toggle streaming\n\
-     /close - Close topic and clean up"
+     /close - Close topic and stop instance"
         .to_string()
 }
 
@@ -33,9 +29,7 @@ fn format_general_help() -> String {
 fn format_topic_help() -> String {
     "Topic Commands:\n\n\
      /session - Show session info\n\
-     /link <path> - Link to directory\n\
-     /stream - Toggle streaming\n\
-     /close - Close topic and clean up\n\n\
+     /close - Close topic and stop instance\n\n\
      Use /help in General topic for all commands."
         .to_string()
 }
@@ -85,22 +79,24 @@ mod tests {
         // Verify header
         assert!(help.contains("OpenCode Telegram Bot"));
 
-        // Verify general commands section
-        assert!(help.contains("General Commands:"));
-        assert!(help.contains("/new <name> - Create new project"));
-        assert!(help.contains("/sessions - List all sessions"));
-        assert!(help.contains("/connect <name> - Connect to session"));
+        // Verify commands section
+        assert!(help.contains("Commands:"));
+        assert!(help.contains("/new <name> - Create new project topic"));
+        assert!(help.contains("/sessions - List active sessions"));
         assert!(help.contains("/projects - List available projects"));
-        assert!(help.contains("/status - Orchestrator status"));
-        assert!(help.contains("/clear - Clean stale mappings"));
+        assert!(help.contains("/status - Show bot status"));
         assert!(help.contains("/help - This help"));
 
         // Verify topic commands section
         assert!(help.contains("In a topic:"));
         assert!(help.contains("/session - Show session info"));
-        assert!(help.contains("/link <path> - Link to directory"));
-        assert!(help.contains("/stream - Toggle streaming"));
-        assert!(help.contains("/close - Close topic and clean up"));
+        assert!(help.contains("/close - Close topic and stop instance"));
+
+        // Verify removed commands are absent
+        assert!(!help.contains("/connect"));
+        assert!(!help.contains("/clear"));
+        assert!(!help.contains("/link"));
+        assert!(!help.contains("/stream"));
     }
 
     #[test]
@@ -112,9 +108,7 @@ mod tests {
 
         // Verify topic commands
         assert!(help.contains("/session - Show session info"));
-        assert!(help.contains("/link <path> - Link to directory"));
-        assert!(help.contains("/stream - Toggle streaming"));
-        assert!(help.contains("/close - Close topic and clean up"));
+        assert!(help.contains("/close - Close topic and stop instance"));
 
         // Verify reference to general help
         assert!(help.contains("Use /help in General topic for all commands."));
@@ -122,10 +116,14 @@ mod tests {
         // Verify general commands are NOT in topic help
         assert!(!help.contains("/new"));
         assert!(!help.contains("/sessions"));
-        assert!(!help.contains("/connect"));
         assert!(!help.contains("/projects"));
         assert!(!help.contains("/status"));
+
+        // Verify removed commands are absent
+        assert!(!help.contains("/connect"));
         assert!(!help.contains("/clear"));
+        assert!(!help.contains("/link"));
+        assert!(!help.contains("/stream"));
     }
 
     #[test]
