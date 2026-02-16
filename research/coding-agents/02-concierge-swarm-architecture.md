@@ -5,33 +5,44 @@ A multi-agent coding system where a fast concierge handles user interaction whil
 ## 1. Core Architecture
 
 ```
-                    ┌─────────────┐
-                    │    User     │
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │  Concierge  │  (fast model, streaming I/O)
-                    │  read-only  │  acknowledges, summarizes, reports
-                    └──────┬──────┘
-                           │ reads
-                    ┌──────▼──────┐
-              ┌────►│   Central   │◄────┐
-              │     │   Queue     │     │
-              │     └──────┬──────┘     │
-              │            │            │
-        ┌─────┴─────┐     │     ┌──────┴─────┐
-        │  Manager   │◄────┘    │  Worker N   │
-        │ (steering) │          │ (dynamic)   │
-        └─────┬──────┘          └──────┬──────┘
-              │                        │
-        ┌─────▼─────┐          ┌──────▼──────┐
-        │ Worker A  │          │ Sub-agent   │
-        └─────┬─────┘          └─────────────┘
-              │
-        ┌─────▼─────┐
-        │ Sub-agent │
-        └───────────┘
+                         ┌──────────┐
+                         │   User   │
+                         └────┬─────┘
+                              │
+                    ┌─────────┴─────────┐
+                    │ (concurrent)      │
+                    ▼                   ▼
+            ┌─────────────┐    ┌──────────────┐
+            │  Concierge  │    │   Manager    │
+            │ (fast model │    │  (steering)  │
+            │  read-only) │    └───┬──────┬───┘
+            └──────┬──────┘        │      │
+                   │          spawns/     │
+                   │ reads    steers      │ reads/writes
+                   │               │      │
+                   │          ┌────▼──────▼────┐
+                   │          │  Worker A..N   │
+                   │          │  (dynamic)     │
+                   │          └──┬──────────┬──┘
+                   │             │          │
+                   ▼             ▼          │
+            ┌─────────────────────────┐    │
+            │     Central Queue       │◄───┘
+            │  (all agents read/write │
+            │   except concierge:     │
+            │   read-only)            │
+            └─────────────────────────┘
+                         │
+                    Sub-agents
+                   (recursive, depth-limited)
 ```
+
+Key topology:
+- **User → Concierge + Manager concurrently** (fan-out on input)
+- **Manager → Workers** (explicit control: spawn, steer, reassign)
+- **Workers ↔ Central Queue** (read/write for status, results, inter-agent comms)
+- **Concierge → Central Queue** (read-only, for status reporting)
+- **All agents → Queue** (source of truth for system state)
 
 ### Components
 
