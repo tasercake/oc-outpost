@@ -27,6 +27,8 @@ pub struct ContainerConfig {
     pub container_port: u16,
     pub worktree_path: String,
     pub config_mount_path: String,
+    pub opencode_data_path: String,
+    pub topic_id: i32,
     pub env_vars: Vec<String>,
 }
 
@@ -51,6 +53,10 @@ impl ContainerConfig {
             format!("{}:/workspace", self.worktree_path),
             format!("{}:/home/user/.config/opencode/:ro", self.config_mount_path),
         ];
+
+        // Add OpenCode data directory mount (per-topic isolation)
+        let data_dir = format!("{}/{}", self.opencode_data_path, self.topic_id);
+        binds.push(format!("{}:/home/user/.local/share/opencode:rw", data_dir));
 
         let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
         let ssh_path = format!("{}/.ssh", home);
@@ -130,6 +136,17 @@ impl ContainerRuntime for DockerRuntime {
             host_port = config.host_port,
             "Creating Docker container"
         );
+
+        // Create OpenCode data directory if it doesn't exist
+        let data_dir = format!("{}/{}", config.opencode_data_path, config.topic_id);
+        tokio::fs::create_dir_all(&data_dir).await.map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to create OpenCode data directory {}: {}",
+                data_dir,
+                e
+            )
+        })?;
+        debug!(data_dir = %data_dir, "OpenCode data directory created");
 
         let port_bindings: HashMap<String, Option<Vec<BollardPortBinding>>> = config
             .port_bindings()
@@ -336,6 +353,7 @@ pub mod mock {
     use std::sync::Mutex;
 
     #[derive(Debug, Clone)]
+    #[allow(dead_code)]
     pub enum MockAction {
         CreateContainer { config_name: String },
         StartContainer { id: String },
@@ -353,6 +371,12 @@ pub mod mock {
         pub inspect_result: Mutex<Result<ContainerInfo, String>>,
         pub list_result: Mutex<Result<Vec<ContainerInfo>, String>>,
         pub actions: Mutex<Vec<MockAction>>,
+    }
+
+    impl Default for MockRuntime {
+        fn default() -> Self {
+            Self::new()
+        }
     }
 
     impl MockRuntime {
@@ -500,6 +524,8 @@ mod tests {
             container_port: 8080,
             worktree_path: "/tmp/projects/.worktrees/my-topic".to_string(),
             config_mount_path: "/home/user/.config/opencode".to_string(),
+            opencode_data_path: "/tmp/opencode-data".to_string(),
+            topic_id: 456,
             env_vars: vec![
                 "ANTHROPIC_API_KEY".to_string(),
                 "OPENAI_API_KEY".to_string(),
@@ -559,6 +585,15 @@ mod tests {
         assert!(binds
             .iter()
             .any(|b| b == "/home/user/.config/opencode:/home/user/.config/opencode/:ro"));
+    }
+
+    #[test]
+    fn test_binds_includes_opencode_data_rw() {
+        let config = test_config();
+        let binds = config.binds();
+        assert!(binds
+            .iter()
+            .any(|b| b == "/tmp/opencode-data/456:/home/user/.local/share/opencode:rw"));
     }
 
     #[test]
@@ -700,6 +735,8 @@ mod tests {
             container_port: 3000,
             worktree_path: "/tmp/work".to_string(),
             config_mount_path: "/tmp/config".to_string(),
+            opencode_data_path: "/tmp/opencode-data".to_string(),
+            topic_id: 789,
             env_vars: vec![],
         };
 
