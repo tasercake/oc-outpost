@@ -120,39 +120,6 @@ impl OpenCodeInstance {
         ))
     }
 
-    /// Create an instance for an external process (not spawned by us).
-    ///
-    /// Useful for discovered or externally registered instances.
-    ///
-    /// # Arguments
-    /// * `config` - Instance configuration
-    /// * `port` - Port the external instance is listening on
-    /// * `pid` - Optional PID of the external process
-    pub fn external(config: InstanceConfig, port: u16, pid: Option<u32>) -> Result<Self> {
-        debug!(
-            instance_id = %config.id,
-            port = port,
-            pid = ?pid,
-            "Creating external instance"
-        );
-
-        let http_client = reqwest::Client::builder()
-            .timeout(HEALTH_CHECK_TIMEOUT)
-            .build()
-            .map_err(|e| anyhow!("Failed to create HTTP client: {}", e))?;
-
-        Ok(Self {
-            id: config.id.clone(),
-            config,
-            port,
-            state: Arc::new(Mutex::new(InstanceState::Running)),
-            runtime: None,
-            container_id: Arc::new(Mutex::new(None)),
-            session_id: Arc::new(Mutex::new(None)),
-            http_client,
-        })
-    }
-
     /// Perform a health check by polling the instance's health endpoint.
     ///
     /// Sends a GET request to `http://localhost:{port}/global/health`.
@@ -402,13 +369,11 @@ mod tests {
     use super::*;
     use crate::orchestrator::container::mock::{MockAction, MockRuntime};
     use crate::orchestrator::container::{ContainerConfig, ContainerInfo, ContainerState};
-    use crate::types::instance::InstanceType;
 
     /// Helper to create a test InstanceConfig
     fn test_config(id: &str, project_path: &str) -> InstanceConfig {
         InstanceConfig {
             id: id.to_string(),
-            instance_type: InstanceType::Managed,
             project_path: project_path.to_string(),
             port: 0,
             auto_start: true,
@@ -424,129 +389,10 @@ mod tests {
             container_port: 8080,
             worktree_path: "/tmp/project".to_string(),
             config_mount_path: "/tmp/config".to_string(),
+            opencode_data_path: "/tmp/opencode".to_string(),
+            topic_id: 1,
             env_vars: vec![],
         }
-    }
-
-    // ==================== External Instance Tests ====================
-
-    #[tokio::test]
-    async fn test_external_creates_instance() {
-        let config = test_config("test-1", "/tmp/test-project");
-        let instance = OpenCodeInstance::external(config, 4100, Some(12345)).unwrap();
-
-        assert_eq!(instance.id(), "test-1");
-        assert_eq!(instance.port(), 4100);
-        assert_eq!(instance.project_path(), "/tmp/test-project");
-    }
-
-    #[tokio::test]
-    async fn test_external_instance_state_is_running() {
-        let config = test_config("test-2", "/tmp/project");
-        let instance = OpenCodeInstance::external(config, 4101, None).unwrap();
-
-        assert_eq!(instance.state().await, InstanceState::Running);
-    }
-
-    // ==================== Port Getter Tests ====================
-
-    #[tokio::test]
-    async fn test_port_getter() {
-        let config = test_config("test-5", "/tmp/project");
-        let instance = OpenCodeInstance::external(config, 4200, None).unwrap();
-
-        assert_eq!(instance.port(), 4200);
-    }
-
-    // ==================== Project Path Getter Tests ====================
-
-    #[tokio::test]
-    async fn test_project_path_getter() {
-        let config = test_config("test-6", "/home/user/my-project");
-        let instance = OpenCodeInstance::external(config, 4201, None).unwrap();
-
-        assert_eq!(instance.project_path(), "/home/user/my-project");
-    }
-
-    // ==================== Session ID Tests ====================
-
-    #[tokio::test]
-    async fn test_session_id_getter_initial_none() {
-        let config = test_config("test-7", "/tmp/project");
-        let instance = OpenCodeInstance::external(config, 4202, None).unwrap();
-
-        assert_eq!(instance.session_id().await, None);
-    }
-
-    #[tokio::test]
-    async fn test_session_id_set_and_get() {
-        let config = test_config("test-8", "/tmp/project");
-        let instance = OpenCodeInstance::external(config, 4203, None).unwrap();
-
-        instance
-            .set_session_id(Some("session-123".to_string()))
-            .await;
-
-        assert_eq!(instance.session_id().await, Some("session-123".to_string()));
-    }
-
-    // ==================== State Transition Tests ====================
-
-    #[tokio::test]
-    async fn test_state_transitions_correctly() {
-        let config = test_config("test-9", "/tmp/project");
-        let instance = OpenCodeInstance::external(config, 4204, None).unwrap();
-
-        assert_eq!(instance.state().await, InstanceState::Running);
-
-        instance.set_state(InstanceState::Stopping).await;
-        assert_eq!(instance.state().await, InstanceState::Stopping);
-
-        instance.set_state(InstanceState::Stopped).await;
-        assert_eq!(instance.state().await, InstanceState::Stopped);
-    }
-
-    #[tokio::test]
-    async fn test_state_can_transition_to_error() {
-        let config = test_config("test-10", "/tmp/project");
-        let instance = OpenCodeInstance::external(config, 4205, None).unwrap();
-
-        instance.set_state(InstanceState::Error).await;
-        assert_eq!(instance.state().await, InstanceState::Error);
-    }
-
-    // ==================== Health Check Tests ====================
-
-    #[tokio::test]
-    async fn test_health_check_fails_when_not_running() {
-        let config = test_config("test-11", "/tmp/project");
-        let instance = OpenCodeInstance::external(config, 59999, None).unwrap();
-
-        let healthy = instance.health_check().await.unwrap();
-        assert!(!healthy);
-    }
-
-    // ==================== Crash Detection Tests ====================
-
-    #[tokio::test]
-    async fn test_crash_detection_no_child() {
-        let config = test_config("test-12", "/tmp/project");
-        let instance = OpenCodeInstance::external(config, 4206, None).unwrap();
-
-        let crashed = instance.check_for_crash().await.unwrap();
-        assert!(!crashed);
-    }
-
-    // ==================== Stop Tests ====================
-
-    #[tokio::test]
-    async fn test_stop_external_instance() {
-        let config = test_config("test-13", "/tmp/project");
-        let instance = OpenCodeInstance::external(config, 4207, None).unwrap();
-
-        instance.stop().await.unwrap();
-
-        assert_eq!(instance.state().await, InstanceState::Stopped);
     }
 
     // ==================== Spawn Tests ====================
@@ -673,40 +519,5 @@ mod tests {
         let actions = runtime.recorded_actions();
         assert!(matches!(actions[0], MockAction::CreateContainer { .. }));
         assert_eq!(actions.len(), 1);
-    }
-
-    // ==================== Wait for Ready Tests ====================
-
-    #[tokio::test]
-    async fn test_wait_for_ready_timeout() {
-        let config = test_config("test-14", "/tmp/project");
-        let instance = OpenCodeInstance::external(config, 59998, None).unwrap();
-
-        let ready = instance
-            .wait_for_ready(Duration::from_millis(200), Duration::from_millis(50))
-            .await
-            .unwrap();
-
-        assert!(!ready);
-    }
-
-    // ==================== Multiple Concurrent Instances ====================
-
-    #[tokio::test]
-    async fn test_multiple_instances_have_unique_ports() {
-        let config1 = test_config("instance-1", "/tmp/project1");
-        let config2 = test_config("instance-2", "/tmp/project2");
-        let config3 = test_config("instance-3", "/tmp/project3");
-
-        let instance1 = OpenCodeInstance::external(config1, 4300, None).unwrap();
-        let instance2 = OpenCodeInstance::external(config2, 4301, None).unwrap();
-        let instance3 = OpenCodeInstance::external(config3, 4302, None).unwrap();
-
-        assert_ne!(instance1.port(), instance2.port());
-        assert_ne!(instance2.port(), instance3.port());
-        assert_ne!(instance1.port(), instance3.port());
-
-        assert_ne!(instance1.id(), instance2.id());
-        assert_ne!(instance2.id(), instance3.id());
     }
 }

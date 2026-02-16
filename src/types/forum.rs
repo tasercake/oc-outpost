@@ -7,7 +7,6 @@ pub struct TopicMapping {
     pub project_path: String,
     pub session_id: Option<String>,
     pub instance_id: Option<String>,
-    pub streaming_enabled: bool,
     pub topic_name_updated: bool,
     pub created_at: i64,
     pub updated_at: i64,
@@ -25,7 +24,6 @@ mod tests {
             "project_path": "/path/to/project",
             "session_id": "session-123",
             "instance_id": "instance-456",
-            "streaming_enabled": true,
             "topic_name_updated": false,
             "created_at": 1640000000,
             "updated_at": 1640000100
@@ -37,7 +35,6 @@ mod tests {
         assert_eq!(mapping.project_path, "/path/to/project");
         assert_eq!(mapping.session_id, Some("session-123".to_string()));
         assert_eq!(mapping.instance_id, Some("instance-456".to_string()));
-        assert!(mapping.streaming_enabled);
         assert!(!mapping.topic_name_updated);
         assert_eq!(mapping.created_at, 1640000000);
         assert_eq!(mapping.updated_at, 1640000100);
@@ -51,7 +48,6 @@ mod tests {
             "project_path": "/path/to/project",
             "session_id": null,
             "instance_id": null,
-            "streaming_enabled": false,
             "topic_name_updated": true,
             "created_at": 1640000000,
             "updated_at": 1640000100
@@ -60,7 +56,6 @@ mod tests {
         let mapping: TopicMapping = serde_json::from_str(json).unwrap();
         assert_eq!(mapping.session_id, None);
         assert_eq!(mapping.instance_id, None);
-        assert!(!mapping.streaming_enabled);
         assert!(mapping.topic_name_updated);
     }
 
@@ -72,7 +67,6 @@ mod tests {
             project_path: "/another/path".to_string(),
             session_id: Some("sess-789".to_string()),
             instance_id: None,
-            streaming_enabled: true,
             topic_name_updated: false,
             created_at: 1650000000,
             updated_at: 1650000200,
@@ -86,7 +80,6 @@ mod tests {
         assert_eq!(deserialized.project_path, mapping.project_path);
         assert_eq!(deserialized.session_id, mapping.session_id);
         assert_eq!(deserialized.instance_id, mapping.instance_id);
-        assert_eq!(deserialized.streaming_enabled, mapping.streaming_enabled);
         assert_eq!(deserialized.topic_name_updated, mapping.topic_name_updated);
         assert_eq!(deserialized.created_at, mapping.created_at);
         assert_eq!(deserialized.updated_at, mapping.updated_at);
@@ -100,7 +93,6 @@ mod tests {
             project_path: "/test/path".to_string(),
             session_id: Some("test-session".to_string()),
             instance_id: Some("test-instance".to_string()),
-            streaming_enabled: false,
             topic_name_updated: true,
             created_at: 1660000000,
             updated_at: 1660000300,

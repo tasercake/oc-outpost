@@ -10,18 +10,9 @@ pub enum InstanceState {
     Error,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum InstanceType {
-    Managed,
-    Discovered,
-    External,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InstanceConfig {
     pub id: String,
-    pub instance_type: InstanceType,
     pub project_path: String,
     pub port: u16,
     pub auto_start: bool,
@@ -37,13 +28,13 @@ fn default_opencode_path() -> String {
 pub struct InstanceInfo {
     pub id: String,
     pub state: InstanceState,
-    pub instance_type: InstanceType,
     pub project_path: String,
     pub port: u16,
     pub pid: Option<u32>,
     pub container_id: Option<String>,
     pub started_at: Option<i64>,
     pub stopped_at: Option<i64>,
+    pub topic_id: i32,
 }
 
 #[cfg(test)]
@@ -80,27 +71,9 @@ mod tests {
     }
 
     #[test]
-    fn test_instance_type_serialization() {
-        let types = vec![
-            (InstanceType::Managed, r#""managed""#),
-            (InstanceType::Discovered, r#""discovered""#),
-            (InstanceType::External, r#""external""#),
-        ];
-
-        for (instance_type, expected_json) in types {
-            let json = serde_json::to_string(&instance_type).unwrap();
-            assert_eq!(json, expected_json);
-
-            let deserialized: InstanceType = serde_json::from_str(&json).unwrap();
-            assert_eq!(deserialized, instance_type);
-        }
-    }
-
-    #[test]
     fn test_instance_config_deserialization() {
         let json = r#"{
             "id": "test-instance",
-            "instance_type": "managed",
             "project_path": "/path/to/project",
             "port": 3000,
             "auto_start": true
@@ -108,7 +81,6 @@ mod tests {
 
         let config: InstanceConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.id, "test-instance");
-        assert_eq!(config.instance_type, InstanceType::Managed);
         assert_eq!(config.project_path, "/path/to/project");
         assert_eq!(config.port, 3000);
         assert!(config.auto_start);
@@ -118,7 +90,6 @@ mod tests {
     fn test_instance_config_serialization_roundtrip() {
         let config = InstanceConfig {
             id: "test-instance".to_string(),
-            instance_type: InstanceType::Discovered,
             project_path: "/path/to/project".to_string(),
             port: 8080,
             auto_start: false,
@@ -129,7 +100,6 @@ mod tests {
         let deserialized: InstanceConfig = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized.id, config.id);
-        assert_eq!(deserialized.instance_type, config.instance_type);
         assert_eq!(deserialized.project_path, config.project_path);
         assert_eq!(deserialized.port, config.port);
         assert_eq!(deserialized.auto_start, config.auto_start);
@@ -140,18 +110,17 @@ mod tests {
         let json = r#"{
             "id": "test-instance",
             "state": "running",
-            "instance_type": "managed",
             "project_path": "/path/to/project",
             "port": 3000,
             "pid": 12345,
             "started_at": 1640000000,
-            "stopped_at": null
+            "stopped_at": null,
+            "topic_id": 0
         }"#;
 
         let info: InstanceInfo = serde_json::from_str(json).unwrap();
         assert_eq!(info.id, "test-instance");
         assert_eq!(info.state, InstanceState::Running);
-        assert_eq!(info.instance_type, InstanceType::Managed);
         assert_eq!(info.project_path, "/path/to/project");
         assert_eq!(info.port, 3000);
         assert_eq!(info.pid, Some(12345));
@@ -164,12 +133,12 @@ mod tests {
         let json = r#"{
             "id": "test-instance",
             "state": "stopped",
-            "instance_type": "external",
             "project_path": "/path/to/project",
             "port": 3000,
             "pid": null,
             "started_at": null,
-            "stopped_at": 1640000000
+            "stopped_at": 1640000000,
+            "topic_id": 0
         }"#;
 
         let info: InstanceInfo = serde_json::from_str(json).unwrap();
@@ -184,13 +153,13 @@ mod tests {
         let info = InstanceInfo {
             id: "test-instance".to_string(),
             state: InstanceState::Running,
-            instance_type: InstanceType::Managed,
             project_path: "/path/to/project".to_string(),
             port: 3000,
             pid: Some(12345),
             container_id: None,
             started_at: Some(1640000000),
             stopped_at: None,
+            topic_id: 0,
         };
 
         let json = serde_json::to_string(&info).unwrap();
@@ -198,7 +167,6 @@ mod tests {
 
         assert_eq!(deserialized.id, info.id);
         assert_eq!(deserialized.state, info.state);
-        assert_eq!(deserialized.instance_type, info.instance_type);
         assert_eq!(deserialized.project_path, info.project_path);
         assert_eq!(deserialized.port, info.port);
         assert_eq!(deserialized.pid, info.pid);
