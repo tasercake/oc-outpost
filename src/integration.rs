@@ -1,11 +1,11 @@
 //! Integration Layer - Wires all components together.
 //!
 //! Responsibilities:
-//! - Message routing (Telegram -> OpenCode)
+//! - Message routing (Telegram -> OpenCode), including photo/image support
 //! - Stream bridging (OpenCode -> Telegram)
 //! - Topic name auto-update after first response
 //! - Rate limiting for Telegram API
-//! - External instance routing
+//! - Whitelist enforcement (defense in depth)
 
 use crate::bot::BotState;
 use crate::opencode::stream_handler::{StreamEvent, StreamHandler};
@@ -13,20 +13,31 @@ use crate::opencode::OpenCodeClient;
 use crate::telegram::markdown::markdown_to_telegram_html;
 use crate::types::error::{OutpostError, Result};
 use crate::types::forum::TopicMapping;
+use crate::types::instance::InstanceState;
+use crate::types::opencode::{FilePart, MessagePart};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use teloxide::net::Download;
 use teloxide::prelude::*;
-use teloxide::types::{MessageId, ParseMode, ThreadId};
+use teloxide::types::{
+    InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode, PhotoSize, ThreadId,
+};
 use tokio::sync::{mpsc, Mutex, RwLock};
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 
 /// Telegram rate limit: ~30 messages/second, we use 2-second batching
 const TELEGRAM_BATCH_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Maximum message length for Telegram (4096 characters)
 const TELEGRAM_MAX_MESSAGE_LENGTH: usize = 4096;
+
+/// Timeout for instance resurrection attempts.
+const RESURRECTION_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Delay before showing "waking up" message during resurrection.
+const RESURRECTION_WAKE_DELAY: Duration = Duration::from_secs(3);
 
 /// Rate limiter state for a topic
 #[derive(Debug, Clone)]
@@ -63,80 +74,60 @@ impl Integration {
         }
     }
 
-    /// Handle incoming Telegram message and route to OpenCode
-    ///
-    /// Flow:
-    /// 1. Extract message text (skip non-text messages gracefully)
-    /// 2. Get topic mapping
-    /// 3. If no mapping, ignore (only handle mapped topics)
-    /// 4. Create OpenCode client for instance
-    /// 5. Mark message as from Telegram (dedup)
-    /// 6. Send to OpenCode async
-    /// 7. If streaming enabled, subscribe to SSE
     pub async fn handle_message(&self, bot: Bot, msg: Message) -> Result<()> {
-        // 1. Extract text from message — skip non-text messages gracefully
-        let text = match msg.text() {
-            Some(t) => t,
-            None => {
-                debug!(
-                    chat_id = msg.chat.id.0,
-                    topic_id = ?msg.thread_id.map(|t| t.0 .0),
-                    sender_id = ?msg.from.as_ref().map(|u| u.id.0),
-                    message_kind = describe_message_kind(&msg),
-                    "Ignoring non-text message"
-                );
-                return Ok(());
-            }
-        };
+        if !self.state.config.is_whitelisted_chat(msg.chat.id.0) {
+            debug!(
+                chat_id = msg.chat.id.0,
+                "Ignoring message from non-whitelisted chat"
+            );
+            return Ok(());
+        }
 
-        debug!(
-            topic_id = ?msg.thread_id.map(|t| t.0 .0),
-            sender_id = ?msg.from.as_ref().map(|u| u.id.0),
-            text_len = text.len(),
-            text_preview = %text.chars().take(100).collect::<String>(),
-            "Received text message in topic"
-        );
-
-        // 2. Get topic ID (thread_id in Telegram)
         let thread_id = msg.thread_id.ok_or_else(|| {
             OutpostError::telegram_error("Message is not in a forum topic (no thread_id)")
         })?;
-        let topic_id = thread_id.0 .0; // Extract i32 from ThreadId(MessageId(i32))
+        let topic_id = thread_id.0 .0;
 
-        debug!(topic_id = topic_id, "Extracted topic ID");
+        let mapping = self
+            .state
+            .topic_store
+            .get_mapping(msg.chat.id.0, topic_id)
+            .await
+            .map_err(|e| OutpostError::database_error(e.to_string()))?;
 
-        // 3. Get topic mapping
-        let mapping = {
-            let topic_store = self.state.topic_store.lock().await;
-            topic_store
-                .get_mapping(topic_id)
-                .await
-                .map_err(|e| OutpostError::database_error(e.to_string()))?
-        };
-
-        debug!(
-            topic_id = topic_id,
-            mapping_found = mapping.is_some(),
-            "Topic mapping lookup result"
-        );
-
-        let mapping = match mapping {
-            Some(m) => m,
-            None => {
-                debug!("No mapping for topic {}, ignoring message", topic_id);
-                return Ok(()); // Not an error, just not a tracked topic
+        if mapping.is_none() {
+            let is_actionable = msg.text().is_some()
+                || msg.photo().is_some()
+                || msg.forum_topic_created().is_some();
+            if is_actionable {
+                info!(
+                    topic_id = topic_id,
+                    chat_id = msg.chat.id.0,
+                    "Unmapped topic detected, sending project selection keyboard"
+                );
+                self.send_project_selection_keyboard(&bot, msg.chat.id, topic_id)
+                    .await?;
+            } else {
+                debug!(
+                    topic_id = topic_id,
+                    message_kind = describe_message_kind(&msg),
+                    "No mapping for topic, ignoring non-actionable message"
+                );
             }
-        };
+            return Ok(());
+        }
+        let mapping = mapping.unwrap();
 
-        // 4. Ensure we have session_id
-        debug!(
-            topic_id = topic_id,
-            session_id = ?mapping.session_id,
-            instance_id = ?mapping.instance_id,
-            streaming = mapping.streaming_enabled,
-            project_path = %mapping.project_path,
-            "Topic mapping details"
-        );
+        let (text, photo) = extract_message_content(&msg);
+        if text.is_none() && photo.is_none() {
+            debug!(
+                chat_id = msg.chat.id.0,
+                topic_id = topic_id,
+                message_kind = describe_message_kind(&msg),
+                "Ignoring unsupported message type in mapped topic"
+            );
+            return Ok(());
+        }
 
         let session_id = match mapping.session_id.as_ref() {
             Some(id) => id,
@@ -144,10 +135,7 @@ impl Integration {
                 warn!(
                     topic_id = topic_id,
                     project_path = %mapping.project_path,
-                    instance_id = ?mapping.instance_id,
-                    sender_id = ?msg.from.as_ref().map(|u| u.id.0),
-                    sender_username = ?msg.from.as_ref().and_then(|u| u.username.as_deref()),
-                    "Message sent to topic with no session — topic has mapping but session_id is None"
+                    "Message sent to topic with no session"
                 );
                 return Err(OutpostError::session_not_found(format!(
                     "No session for topic {} (project: {})",
@@ -156,72 +144,303 @@ impl Integration {
             }
         };
 
-        // 5. Get OpenCode client for instance
-        let port = self.get_instance_port(&mapping).await?;
-        debug!(topic_id = topic_id, port = port, "Resolved instance port");
+        let port = self
+            .get_port_or_resurrect(&bot, msg.chat.id, topic_id, &mapping)
+            .await?;
         let client = OpenCodeClient::new(&format!("http://localhost:{}", port));
 
-        // 6. Mark as from Telegram (for deduplication)
-        self.stream_handler.mark_from_telegram(session_id, text);
-        debug!(
-            session_id = session_id,
-            "Marked message as from Telegram for dedup"
-        );
+        let mut parts: Vec<MessagePart> = Vec::new();
 
-        // 7. Send message to OpenCode async
+        if let Some(ref text) = text {
+            parts.push(MessagePart::Text {
+                text: text.to_string(),
+            });
+            self.stream_handler.mark_from_telegram(session_id, text);
+        }
+
+        if let Some(photo_sizes) = photo {
+            match self
+                .download_photo(&bot, photo_sizes, &mapping.project_path)
+                .await
+            {
+                Ok(file_part) => {
+                    trace!(
+                        topic_id = topic_id,
+                        mime = %file_part.mime,
+                        "Image downloaded for OpenCode"
+                    );
+                    parts.push(MessagePart::File(file_part));
+                }
+                Err(e) => {
+                    warn!(topic_id = topic_id, error = ?e, "Failed to download photo, sending text only");
+                }
+            }
+        }
+
+        if parts.is_empty() {
+            return Ok(());
+        }
+
         client
-            .send_message_async(session_id, text)
+            .send_message_parts_async(session_id, parts)
             .await
             .map_err(|e| OutpostError::opencode_api_error(e.to_string()))?;
 
-        debug!(
-            session_id = session_id,
-            topic_id = topic_id,
-            "Message sent to OpenCode async"
-        );
-
         info!(
-            "Routed message to OpenCode: topic={}, session={}",
-            topic_id, session_id
-        );
-
-        // 8. Subscribe to SSE if streaming enabled and not already subscribed
-        if mapping.streaming_enabled {
-            self.ensure_stream_subscription(bot, msg.chat.id, topic_id, &mapping)
-                .await?;
-        }
-
-        debug!(
             topic_id = topic_id,
-            streaming_enabled = mapping.streaming_enabled,
-            "Streaming subscription check complete"
+            session_id = session_id,
+            "Routed message to OpenCode"
         );
+
+        self.ensure_stream_subscription(bot, msg.chat.id, topic_id, &mapping)
+            .await?;
 
         Ok(())
     }
 
-    /// Get the port for an instance from the mapping
-    async fn get_instance_port(&self, mapping: &TopicMapping) -> Result<u16> {
-        debug!(instance_id = ?mapping.instance_id, "Looking up instance port");
+    async fn send_project_selection_keyboard(
+        &self,
+        bot: &Bot,
+        chat_id: ChatId,
+        topic_id: i32,
+    ) -> Result<()> {
+        let dirs =
+            crate::bot::handlers::projects::list_project_dirs(&self.state.config.project_base_path);
 
-        // For external instances, we need to look up the port from the orchestrator store
-        if let Some(instance_id) = &mapping.instance_id {
-            let store = self.state.orchestrator_store.lock().await;
-            if let Ok(Some(info)) = store.get_instance(instance_id).await {
-                debug!(
-                    instance_id = ?mapping.instance_id,
-                    port = info.port,
-                    "Found port in orchestrator store"
-                );
-                return Ok(info.port);
+        if dirs.is_empty() {
+            bot.send_message(
+                chat_id,
+                "No projects available. Add project directories to get started.",
+            )
+            .message_thread_id(ThreadId(MessageId(topic_id)))
+            .await
+            .map_err(|e| OutpostError::telegram_error(e.to_string()))?;
+            return Ok(());
+        }
+
+        let topic_id_str = topic_id.to_string();
+        let buttons: Vec<Vec<InlineKeyboardButton>> = dirs
+            .iter()
+            .filter(|name| {
+                let data_len = 5 + topic_id_str.len() + 1 + name.len();
+                if data_len > 64 {
+                    warn!(project = %name, "Skipping project: name too long for callback data");
+                    false
+                } else {
+                    true
+                }
+            })
+            .map(|name| {
+                vec![InlineKeyboardButton::callback(
+                    name.clone(),
+                    format!("proj:{}:{}", topic_id_str, name),
+                )]
+            })
+            .collect();
+
+        if buttons.is_empty() {
+            bot.send_message(chat_id, "No projects available with compatible names.")
+                .message_thread_id(ThreadId(MessageId(topic_id)))
+                .await
+                .map_err(|e| OutpostError::telegram_error(e.to_string()))?;
+            return Ok(());
+        }
+
+        let keyboard = InlineKeyboardMarkup::new(buttons);
+        bot.send_message(chat_id, "Select a project for this topic:")
+            .message_thread_id(ThreadId(MessageId(topic_id)))
+            .reply_markup(keyboard)
+            .await
+            .map_err(|e| OutpostError::telegram_error(e.to_string()))?;
+
+        debug!(
+            topic_id = topic_id,
+            project_count = dirs.len(),
+            "Project selection keyboard sent"
+        );
+        Ok(())
+    }
+
+    /// Download a Telegram photo and save it to the container's mounted volume.
+    /// Returns a `FilePart` with a `file://` URL pointing to the container-internal path.
+    async fn download_photo(
+        &self,
+        bot: &Bot,
+        photo_sizes: &[PhotoSize],
+        project_path: &str,
+    ) -> std::result::Result<FilePart, anyhow::Error> {
+        use uuid::Uuid;
+
+        let photo = photo_sizes
+            .last()
+            .ok_or_else(|| anyhow::anyhow!("Empty photo sizes array"))?;
+
+        let file = bot
+            .get_file(photo.file.id.clone())
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to get file info: {}", e))?;
+
+        let image_id = Uuid::new_v4();
+        let filename = format!("{}.jpg", image_id);
+
+        // Host path: {project_path}/.opencode-images/{uuid}.jpg
+        let host_dir = PathBuf::from(project_path).join(".opencode-images");
+        tokio::fs::create_dir_all(&host_dir).await?;
+        let host_path = host_dir.join(&filename);
+
+        let mut dest = tokio::fs::File::create(&host_path).await?;
+        bot.download_file(&file.path, &mut dest).await?;
+
+        trace!(host_path = %host_path.display(), "Photo saved to host volume");
+
+        // Container-internal path (project dir is mounted at /workspace)
+        let container_path = PathBuf::from("/workspace/.opencode-images").join(&filename);
+        Ok(FilePart::new("image/jpeg", &container_path))
+    }
+
+    async fn get_port_or_resurrect(
+        &self,
+        bot: &Bot,
+        chat_id: ChatId,
+        topic_id: i32,
+        mapping: &TopicMapping,
+    ) -> Result<u16> {
+        let path = Path::new(&mapping.project_path);
+        if let Some(instance) = self.state.instance_manager.get_instance_by_path(path).await {
+            let inst = instance.lock().await;
+            if matches!(
+                inst.state().await,
+                InstanceState::Running | InstanceState::Starting
+            ) {
+                return Ok(inst.port());
             }
         }
 
-        // Fall back to config's default port (for managed instances)
-        debug!(
-            default_port = self.state.config.opencode_port_start,
-            "Using default port (instance not in store)"
+        if let Some(instance_id) = &mapping.instance_id {
+            if let Ok(Some(info)) = self
+                .state
+                .orchestrator_store
+                .get_instance(instance_id)
+                .await
+            {
+                if info.state == InstanceState::Running {
+                    return Ok(info.port);
+                }
+            }
+        }
+
+        self.resurrect_instance(bot, chat_id, topic_id, mapping)
+            .await
+    }
+
+    async fn resurrect_instance(
+        &self,
+        bot: &Bot,
+        chat_id: ChatId,
+        topic_id: i32,
+        mapping: &TopicMapping,
+    ) -> Result<u16> {
+        info!(
+            topic_id = topic_id,
+            session_id = ?mapping.session_id,
+            project_path = %mapping.project_path,
+            "Resurrecting stopped instance for mapped topic"
         );
+
+        let wake_msg_id: Arc<Mutex<Option<MessageId>>> = Arc::new(Mutex::new(None));
+        let wake_clone = wake_msg_id.clone();
+        let bot_wake = bot.clone();
+        let wake_handle = tokio::spawn(async move {
+            tokio::time::sleep(RESURRECTION_WAKE_DELAY).await;
+            if let Ok(msg) = bot_wake
+                .send_message(chat_id, "Waking up session...")
+                .message_thread_id(ThreadId(MessageId(topic_id)))
+                .await
+            {
+                *wake_clone.lock().await = Some(msg.id);
+            }
+        });
+
+        let path = Path::new(&mapping.project_path);
+        let result = tokio::time::timeout(
+            RESURRECTION_TIMEOUT,
+            self.state.instance_manager.get_or_create(path, topic_id),
+        )
+        .await;
+
+        wake_handle.abort();
+        let maybe_wake_id = { *wake_msg_id.lock().await };
+        if let Some(mid) = maybe_wake_id {
+            let _ = bot.delete_message(chat_id, mid).await;
+        }
+
+        match result {
+            Ok(Ok(instance)) => {
+                let inst = instance.lock().await;
+                let port = inst.port();
+                let new_instance_id = inst.id().to_string();
+                drop(inst);
+
+                let mut updated_mapping = mapping.clone();
+                updated_mapping.instance_id = Some(new_instance_id.clone());
+                updated_mapping.updated_at = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64;
+
+                self.state
+                    .topic_store
+                    .save_mapping(&updated_mapping)
+                    .await
+                    .map_err(|e| OutpostError::database_error(e.to_string()))?;
+
+                info!(
+                    topic_id = topic_id,
+                    new_instance_id = %new_instance_id,
+                    port = port,
+                    session_id = ?mapping.session_id,
+                    "Instance resurrected successfully"
+                );
+
+                Ok(port)
+            }
+            Ok(Err(e)) => {
+                warn!(
+                    topic_id = topic_id,
+                    error = ?e,
+                    "Failed to resurrect instance"
+                );
+                Err(OutpostError::opencode_api_error(format!(
+                    "Failed to wake up session: {}",
+                    e
+                )))
+            }
+            Err(_elapsed) => {
+                warn!(
+                    topic_id = topic_id,
+                    timeout_secs = RESURRECTION_TIMEOUT.as_secs(),
+                    "Instance resurrection timed out"
+                );
+                Err(OutpostError::opencode_api_error(
+                    "Session wake-up timed out (30s)",
+                ))
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    // Retained for direct port lookup without resurrection
+    async fn get_instance_port(&self, mapping: &TopicMapping) -> Result<u16> {
+        if let Some(instance_id) = &mapping.instance_id {
+            if let Ok(Some(info)) = self
+                .state
+                .orchestrator_store
+                .get_instance(instance_id)
+                .await
+            {
+                return Ok(info.port);
+            }
+        }
         Ok(self.state.config.opencode_port_start)
     }
 
@@ -566,13 +785,11 @@ impl Integration {
             .map_err(|e| OutpostError::telegram_error(e.to_string()))?;
 
         // Mark as updated in store
-        {
-            let topic_store = state.topic_store.lock().await;
-            topic_store
-                .mark_topic_name_updated(topic_id)
-                .await
-                .map_err(|e| OutpostError::database_error(e.to_string()))?;
-        }
+        state
+            .topic_store
+            .mark_topic_name_updated(chat_id.0, topic_id)
+            .await
+            .map_err(|e| OutpostError::database_error(e.to_string()))?;
 
         info!("Updated topic {} name to '{}'", topic_id, project_name);
 
@@ -617,6 +834,12 @@ impl Integration {
     pub async fn active_stream_count(&self) -> usize {
         self.active_streams.lock().await.len()
     }
+}
+
+fn extract_message_content(msg: &Message) -> (Option<&str>, Option<&[PhotoSize]>) {
+    let text = msg.text().or_else(|| msg.caption());
+    let photo = msg.photo();
+    (text, photo)
 }
 
 fn describe_message_kind(msg: &Message) -> &'static str {
@@ -677,7 +900,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = Config {
             telegram_bot_token: "test_token".to_string(),
-            telegram_chat_id: -1001234567890,
+            telegram_chat_ids: vec![-1001234567890],
             telegram_allowed_users: vec![],
             handle_general_topic: true,
             opencode_path: PathBuf::from("opencode"),
@@ -687,13 +910,12 @@ mod tests {
             opencode_port_pool_size: 100,
             opencode_health_check_interval: Duration::from_secs(30),
             opencode_startup_timeout: Duration::from_secs(60),
+            opencode_data_path: PathBuf::from("/tmp/opencode-data"),
             orchestrator_db_path: temp_dir.path().join("orchestrator.db"),
             topic_db_path: temp_dir.path().join("topics.db"),
             log_db_path: temp_dir.path().join("logs.db"),
             project_base_path: temp_dir.path().to_path_buf(),
             auto_create_project_dirs: true,
-            api_port: 4200,
-            api_key: None,
             docker_image: "ghcr.io/sst/opencode".to_string(),
             opencode_config_path: PathBuf::from("/tmp/oc-config"),
             container_port: 8080,
@@ -744,7 +966,7 @@ mod tests {
             project_path: "/test/my-project".to_string(),
             session_id: Some("session-123".to_string()),
             instance_id: Some("inst-456".to_string()),
-            streaming_enabled: true,
+
             topic_name_updated: false,
             created_at: now,
             updated_at: now,
@@ -765,8 +987,11 @@ mod tests {
 
         // Create mock message (this would need teloxide test utilities)
         // For now, we test the underlying logic indirectly
-        let topic_store = state.topic_store.lock().await;
-        let mapping = topic_store.get_mapping(999).await.unwrap();
+        let mapping = state
+            .topic_store
+            .get_mapping(-1001234567890, 999)
+            .await
+            .unwrap();
         assert!(mapping.is_none()); // No mapping exists
     }
 
@@ -776,18 +1001,16 @@ mod tests {
 
         // Create a mapping
         let mapping = create_test_mapping(123);
-        {
-            let topic_store = state.topic_store.lock().await;
-            topic_store.save_mapping(&mapping).await.unwrap();
-        }
+        state.topic_store.save_mapping(&mapping).await.unwrap();
 
         let _integration = Integration::new(state.clone(), stream_handler);
 
         // Verify mapping exists
-        let stored = {
-            let topic_store = state.topic_store.lock().await;
-            topic_store.get_mapping(123).await.unwrap()
-        };
+        let stored = state
+            .topic_store
+            .get_mapping(-1001234567890, 123)
+            .await
+            .unwrap();
         assert!(stored.is_some());
         assert_eq!(stored.unwrap().session_id, Some("session-123".to_string()));
     }
@@ -869,9 +1092,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_mapping_streaming_enabled() {
+    async fn test_mapping_defaults() {
         let mapping = create_test_mapping(123);
-        assert!(mapping.streaming_enabled);
         assert!(!mapping.topic_name_updated);
     }
 
@@ -928,64 +1150,49 @@ mod tests {
         // Setup mapping for managed instance
         let mut mapping = create_test_mapping(100);
         mapping.instance_id = None; // Managed instance doesn't need instance_id lookup
-        {
-            let topic_store = state.topic_store.lock().await;
-            topic_store.save_mapping(&mapping).await.unwrap();
-        }
+        state.topic_store.save_mapping(&mapping).await.unwrap();
 
         let _integration = Integration::new(state.clone(), stream_handler);
 
         // Verify setup
-        let stored = {
-            let topic_store = state.topic_store.lock().await;
-            topic_store.get_mapping(100).await.unwrap()
-        };
+        let stored = state
+            .topic_store
+            .get_mapping(-1001234567890, 100)
+            .await
+            .unwrap();
         assert!(stored.is_some());
     }
 
     #[tokio::test]
-    async fn test_route_message_to_discovered_instance() {
+    async fn test_route_message_with_instance_id() {
         let (state, stream_handler, _temp_dir) = create_test_state().await;
 
-        // Setup mapping for discovered instance
         let mut mapping = create_test_mapping(200);
-        mapping.instance_id = Some("discovered-inst".to_string());
-        {
-            let topic_store = state.topic_store.lock().await;
-            topic_store.save_mapping(&mapping).await.unwrap();
-        }
+        mapping.instance_id = Some("some-inst".to_string());
+        state.topic_store.save_mapping(&mapping).await.unwrap();
 
         let _integration = Integration::new(state.clone(), stream_handler);
 
-        // Verify setup
-        let stored = {
-            let topic_store = state.topic_store.lock().await;
-            topic_store.get_mapping(200).await.unwrap()
-        };
+        let stored = state
+            .topic_store
+            .get_mapping(-1001234567890, 200)
+            .await
+            .unwrap();
         assert!(stored.is_some());
-        assert_eq!(
-            stored.unwrap().instance_id,
-            Some("discovered-inst".to_string())
-        );
+        assert_eq!(stored.unwrap().instance_id, Some("some-inst".to_string()));
     }
 
     #[tokio::test]
-    async fn test_route_message_to_external_instance() {
+    async fn test_port_fallback_when_instance_not_in_store() {
         let (state, stream_handler, _temp_dir) = create_test_state().await;
 
-        // Setup mapping for external instance
         let mut mapping = create_test_mapping(300);
-        mapping.instance_id = Some("external-inst".to_string());
-        {
-            let topic_store = state.topic_store.lock().await;
-            topic_store.save_mapping(&mapping).await.unwrap();
-        }
+        mapping.instance_id = Some("unknown-inst".to_string());
+        state.topic_store.save_mapping(&mapping).await.unwrap();
 
         let integration = Integration::new(state.clone(), stream_handler);
 
-        // Test port fallback for external instance
         let port = integration.get_instance_port(&mapping).await.unwrap();
-        // Falls back to default since instance isn't in orchestrator store
         assert_eq!(port, state.config.opencode_port_start);
     }
 
@@ -1010,5 +1217,138 @@ mod tests {
             }
             _ => panic!("Expected PermissionRequest"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_file_part_for_image_pipeline() {
+        let container_path = PathBuf::from("/workspace/.opencode-images/test-uuid.jpg");
+        let file_part = FilePart::new("image/jpeg", &container_path);
+
+        assert_eq!(file_part.mime, "image/jpeg");
+        assert!(file_part.url.starts_with("file://"));
+        assert!(file_part.url.contains("/workspace/.opencode-images/"));
+        assert_eq!(file_part.filename, Some("test-uuid.jpg".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_whitelist_rejects_unknown_chat() {
+        let (state, _, _temp_dir) = create_test_state().await;
+        assert!(!state.config.is_whitelisted_chat(-9999));
+        assert!(state.config.is_whitelisted_chat(-1001234567890));
+    }
+
+    #[tokio::test]
+    async fn test_message_parts_construction() {
+        let mut parts: Vec<MessagePart> = Vec::new();
+        parts.push(MessagePart::Text {
+            text: "Hello".to_string(),
+        });
+
+        let container_path = PathBuf::from("/workspace/.opencode-images/img.jpg");
+        parts.push(MessagePart::File(FilePart::new(
+            "image/jpeg",
+            &container_path,
+        )));
+
+        assert_eq!(parts.len(), 2);
+        match &parts[0] {
+            MessagePart::Text { text } => assert_eq!(text, "Hello"),
+            _ => panic!("Expected Text"),
+        }
+        match &parts[1] {
+            MessagePart::File(fp) => assert_eq!(fp.mime, "image/jpeg"),
+            _ => panic!("Expected File"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_resurrection_constants() {
+        assert_eq!(RESURRECTION_TIMEOUT, Duration::from_secs(30));
+        assert_eq!(RESURRECTION_WAKE_DELAY, Duration::from_secs(3));
+    }
+
+    #[tokio::test]
+    async fn test_mapping_with_session_but_no_running_instance() {
+        let (state, stream_handler, _temp_dir) = create_test_state().await;
+
+        let mapping = create_test_mapping(500);
+        assert!(mapping.session_id.is_some());
+        assert!(mapping.instance_id.is_some());
+        state.topic_store.save_mapping(&mapping).await.unwrap();
+
+        let integration = Integration::new(state.clone(), stream_handler);
+
+        let path = std::path::Path::new(&mapping.project_path);
+        let running = integration
+            .state
+            .instance_manager
+            .get_instance_by_path(path)
+            .await;
+        assert!(running.is_none());
+
+        let stored = state
+            .topic_store
+            .get_mapping(-1001234567890, 500)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.session_id, Some("session-123".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_resurrection_preserves_session_id_in_mapping() {
+        let (state, _stream_handler, _temp_dir) = create_test_state().await;
+
+        let mapping = create_test_mapping(600);
+        let original_session_id = mapping.session_id.clone();
+        state.topic_store.save_mapping(&mapping).await.unwrap();
+
+        let mut updated = mapping.clone();
+        updated.instance_id = Some("new-inst-789".to_string());
+        updated.updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        state.topic_store.save_mapping(&updated).await.unwrap();
+
+        let stored = state
+            .topic_store
+            .get_mapping(-1001234567890, 600)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(stored.session_id, original_session_id);
+        assert_eq!(stored.instance_id, Some("new-inst-789".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_instance_state_resurrection_gate() {
+        use crate::types::instance::InstanceState;
+
+        // Only Running/Starting should bypass resurrection
+        assert!(matches!(
+            InstanceState::Running,
+            InstanceState::Running | InstanceState::Starting
+        ));
+        assert!(matches!(
+            InstanceState::Starting,
+            InstanceState::Running | InstanceState::Starting
+        ));
+
+        // Stopped/Error should trigger resurrection
+        assert!(!matches!(
+            InstanceState::Stopped,
+            InstanceState::Running | InstanceState::Starting
+        ));
+        assert!(!matches!(
+            InstanceState::Error,
+            InstanceState::Running | InstanceState::Starting
+        ));
+        assert!(!matches!(
+            InstanceState::Stopping,
+            InstanceState::Running | InstanceState::Starting
+        ));
     }
 }

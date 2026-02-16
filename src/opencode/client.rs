@@ -14,7 +14,7 @@ pub struct OpenCodeClient {
 
 /// Metadata for a message response
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct ResponseMetadata {
+pub struct ResponseMetadata {
     pub id: String,
     pub role: String,
     pub model: Option<String>,
@@ -226,17 +226,25 @@ impl OpenCodeClient {
         Ok(message_response)
     }
 
-    /// Send a message asynchronously (fire and forget)
+    #[allow(dead_code)]
     pub async fn send_message_async(&self, session_id: &str, text: &str) -> Result<()> {
-        let url = format!("{}/session/{}/prompt_async", self.base_url, session_id);
-        debug!(session_id = %session_id, text_len = text.len(), url = %url, "Sending message (async)");
+        let parts = vec![MessagePart::Text {
+            text: text.to_string(),
+        }];
+        self.send_message_parts_async(session_id, parts).await
+    }
 
-        // Create a proper message structure
+    pub async fn send_message_parts_async(
+        &self,
+        session_id: &str,
+        parts: Vec<MessagePart>,
+    ) -> Result<()> {
+        let url = format!("{}/session/{}/prompt_async", self.base_url, session_id);
+        debug!(session_id = %session_id, parts_count = parts.len(), url = %url, "Sending message (async)");
+
         let message = Message {
             role: "user".to_string(),
-            content: vec![MessagePart::Text {
-                text: text.to_string(),
-            }],
+            content: parts,
         };
 
         let request_body = CreateMessageRequest {
