@@ -8,11 +8,11 @@ use tracing::debug;
 pub struct Config {
     // Telegram (4 fields)
     pub telegram_bot_token: String,
-    pub telegram_chat_id: i64,
+    pub telegram_chat_ids: Vec<i64>,
     pub telegram_allowed_users: Vec<i64>,
     pub handle_general_topic: bool,
 
-    // OpenCode (7 fields)
+    // OpenCode (8 fields)
     pub opencode_path: PathBuf,
     pub opencode_max_instances: usize,
     pub opencode_idle_timeout: Duration,
@@ -20,6 +20,7 @@ pub struct Config {
     pub opencode_port_pool_size: u16,
     pub opencode_health_check_interval: Duration,
     pub opencode_startup_timeout: Duration,
+    pub opencode_data_path: PathBuf,
 
     // Storage (3 fields)
     pub orchestrator_db_path: PathBuf,
@@ -29,10 +30,6 @@ pub struct Config {
     // Project (2 fields)
     pub project_base_path: PathBuf,
     pub auto_create_project_dirs: bool,
-
-    // API (2 fields)
-    pub api_port: u16,
-    pub api_key: Option<String>,
 
     // Docker (4 fields)
     pub docker_image: String,
@@ -60,10 +57,16 @@ impl Config {
         let telegram_bot_token = std::env::var("TELEGRAM_BOT_TOKEN")
             .map_err(|_| anyhow!("TELEGRAM_BOT_TOKEN is required but not set"))?;
 
-        let telegram_chat_id = std::env::var("TELEGRAM_CHAT_ID")
-            .map_err(|_| anyhow!("TELEGRAM_CHAT_ID is required but not set"))?
-            .parse::<i64>()
-            .map_err(|_| anyhow!("TELEGRAM_CHAT_ID must be a valid integer"))?;
+        let telegram_chat_ids = std::env::var("TELEGRAM_CHAT_IDS")
+            .map_err(|_| anyhow!("TELEGRAM_CHAT_IDS is required but not set"))?
+            .split(',')
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| {
+                s.trim()
+                    .parse::<i64>()
+                    .map_err(|_| anyhow!("TELEGRAM_CHAT_IDS contains invalid integer"))
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         let telegram_allowed_users = std::env::var("TELEGRAM_ALLOWED_USERS")
             .unwrap_or_default()
@@ -92,7 +95,7 @@ impl Config {
 
         let opencode_idle_timeout = Duration::from_millis(
             std::env::var("OPENCODE_IDLE_TIMEOUT_MS")
-                .unwrap_or_else(|_| "1800000".to_string())
+                .unwrap_or_else(|_| "86400000".to_string())
                 .parse::<u64>()
                 .map_err(|_| anyhow!("OPENCODE_IDLE_TIMEOUT_MS must be a valid integer"))?,
         );
@@ -123,6 +126,11 @@ impl Config {
                 .map_err(|_| anyhow!("OPENCODE_STARTUP_TIMEOUT_MS must be a valid integer"))?,
         );
 
+        let opencode_data_path_raw = std::env::var("OPENCODE_DATA_PATH")
+            .unwrap_or_else(|_| "~/.local/share/opencode".to_string());
+        let opencode_data_path =
+            PathBuf::from(shellexpand::tilde(&opencode_data_path_raw).into_owned());
+
         let orchestrator_db_path = PathBuf::from(
             std::env::var("ORCHESTRATOR_DB_PATH")
                 .unwrap_or_else(|_| "./data/orchestrator.db".to_string()),
@@ -144,13 +152,6 @@ impl Config {
             .unwrap_or_else(|_| "true".to_string())
             .parse::<bool>()
             .map_err(|_| anyhow!("AUTO_CREATE_PROJECT_DIRS must be 'true' or 'false'"))?;
-
-        let api_port = std::env::var("API_PORT")
-            .unwrap_or_else(|_| "4200".to_string())
-            .parse::<u16>()
-            .map_err(|_| anyhow!("API_PORT must be a valid port number"))?;
-
-        let api_key = std::env::var("API_KEY").ok();
 
         let docker_image = std::env::var("OPENCODE_DOCKER_IMAGE")
             .unwrap_or_else(|_| "ghcr.io/sst/opencode".to_string());
@@ -185,20 +186,19 @@ impl Config {
             log_db = %log_db_path.display(),
             project_base = %project_base_path.display(),
             auto_create_dirs = auto_create_project_dirs,
-            api_port = api_port,
-            has_api_key = api_key.is_some(),
             docker_image = %docker_image,
             opencode_config_path = %opencode_config_path.display(),
             container_port = container_port,
             env_passthrough_count = env_passthrough.len(),
             allowed_users_count = telegram_allowed_users.len(),
+            chat_ids_count = telegram_chat_ids.len(),
             handle_general_topic = handle_general_topic,
             "Config resolved from environment"
         );
 
         Ok(Config {
             telegram_bot_token,
-            telegram_chat_id,
+            telegram_chat_ids,
             telegram_allowed_users,
             handle_general_topic,
             opencode_path,
@@ -208,18 +208,21 @@ impl Config {
             opencode_port_pool_size,
             opencode_health_check_interval,
             opencode_startup_timeout,
+            opencode_data_path,
             orchestrator_db_path,
             topic_db_path,
             log_db_path,
             project_base_path,
             auto_create_project_dirs,
-            api_port,
-            api_key,
             docker_image,
             opencode_config_path,
             container_port,
             env_passthrough,
         })
+    }
+
+    pub fn is_whitelisted_chat(&self, chat_id: i64) -> bool {
+        self.telegram_chat_ids.contains(&chat_id)
     }
 }
 
@@ -227,8 +230,8 @@ impl std::fmt::Display for Config {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Config {{\n  telegram_bot_token: ***MASKED***,\n  telegram_chat_id: {},\n  telegram_allowed_users: {:?},\n  handle_general_topic: {},\n  opencode_path: {:?},\n  opencode_max_instances: {},\n  opencode_idle_timeout: {:?},\n  opencode_port_start: {},\n  opencode_port_pool_size: {},\n  opencode_health_check_interval: {:?},\n  opencode_startup_timeout: {:?},\n  orchestrator_db_path: {:?},\n  topic_db_path: {:?},\n  log_db_path: {:?},\n  project_base_path: {:?},\n  auto_create_project_dirs: {},\n  api_port: {},\n  api_key: {},\n  docker_image: {:?},\n  opencode_config_path: {:?},\n  container_port: {},\n  env_passthrough: {:?},\n}}",
-            self.telegram_chat_id,
+            "Config {{\n  telegram_bot_token: ***MASKED***,\n  telegram_chat_ids: {:?},\n  telegram_allowed_users: {:?},\n  handle_general_topic: {},\n  opencode_path: {:?},\n  opencode_max_instances: {},\n  opencode_idle_timeout: {:?},\n  opencode_port_start: {},\n  opencode_port_pool_size: {},\n  opencode_health_check_interval: {:?},\n  opencode_startup_timeout: {:?},\n  opencode_data_path: {:?},\n  orchestrator_db_path: {:?},\n  topic_db_path: {:?},\n  log_db_path: {:?},\n  project_base_path: {:?},\n  auto_create_project_dirs: {},\n  docker_image: {:?},\n  opencode_config_path: {:?},\n  container_port: {},\n  env_passthrough: {:?},\n}}",
+            self.telegram_chat_ids,
             self.telegram_allowed_users,
             self.handle_general_topic,
             self.opencode_path,
@@ -238,13 +241,12 @@ impl std::fmt::Display for Config {
             self.opencode_port_pool_size,
             self.opencode_health_check_interval,
             self.opencode_startup_timeout,
+            self.opencode_data_path,
             self.orchestrator_db_path,
             self.topic_db_path,
             self.log_db_path,
             self.project_base_path,
             self.auto_create_project_dirs,
-            self.api_port,
-            if self.api_key.is_some() { "***MASKED***" } else { "None" },
             self.docker_image,
             self.opencode_config_path,
             self.container_port,
@@ -262,7 +264,7 @@ mod tests {
     fn clean_config_env() {
         for var in [
             "TELEGRAM_BOT_TOKEN",
-            "TELEGRAM_CHAT_ID",
+            "TELEGRAM_CHAT_IDS",
             "TELEGRAM_ALLOWED_USERS",
             "HANDLE_GENERAL_TOPIC",
             "OPENCODE_PATH",
@@ -272,13 +274,12 @@ mod tests {
             "OPENCODE_PORT_POOL_SIZE",
             "OPENCODE_HEALTH_CHECK_INTERVAL_MS",
             "OPENCODE_STARTUP_TIMEOUT_MS",
+            "OPENCODE_DATA_PATH",
             "ORCHESTRATOR_DB_PATH",
             "TOPIC_DB_PATH",
             "LOG_DB_PATH",
             "PROJECT_BASE_PATH",
             "AUTO_CREATE_PROJECT_DIRS",
-            "API_PORT",
-            "API_KEY",
             "OPENCODE_DOCKER_IMAGE",
             "OPENCODE_CONFIG_PATH",
             "OPENCODE_CONTAINER_PORT",
@@ -306,10 +307,10 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_missing_telegram_chat_id() {
+    fn test_missing_telegram_chat_ids() {
         clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
-        std::env::remove_var("TELEGRAM_CHAT_ID");
+        std::env::remove_var("TELEGRAM_CHAT_IDS");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
 
         let result = Config::from_env_no_dotenv();
@@ -317,7 +318,7 @@ mod tests {
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("TELEGRAM_CHAT_ID is required"));
+            .contains("TELEGRAM_CHAT_IDS is required"));
     }
 
     #[test]
@@ -325,7 +326,7 @@ mod tests {
     fn test_missing_project_base_path() {
         clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
-        std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
+        std::env::set_var("TELEGRAM_CHAT_IDS", "-1001234567890");
         std::env::remove_var("PROJECT_BASE_PATH");
 
         let result = Config::from_env_no_dotenv();
@@ -341,7 +342,7 @@ mod tests {
     fn test_defaults_applied_correctly() {
         clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
-        std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
+        std::env::set_var("TELEGRAM_CHAT_IDS", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
 
         std::env::remove_var("OPENCODE_PATH");
@@ -351,20 +352,22 @@ mod tests {
         std::env::remove_var("OPENCODE_PORT_POOL_SIZE");
         std::env::remove_var("OPENCODE_HEALTH_CHECK_INTERVAL_MS");
         std::env::remove_var("OPENCODE_STARTUP_TIMEOUT_MS");
+        std::env::remove_var("OPENCODE_DATA_PATH");
         std::env::remove_var("ORCHESTRATOR_DB_PATH");
         std::env::remove_var("TOPIC_DB_PATH");
         std::env::remove_var("LOG_DB_PATH");
         std::env::remove_var("AUTO_CREATE_PROJECT_DIRS");
-        std::env::remove_var("API_PORT");
         std::env::remove_var("TELEGRAM_ALLOWED_USERS");
         std::env::remove_var("HANDLE_GENERAL_TOPIC");
-        std::env::remove_var("API_KEY");
 
         let config = Config::from_env_no_dotenv().expect("Config should load with defaults");
 
         assert_eq!(config.opencode_path, PathBuf::from("opencode"));
         assert_eq!(config.opencode_max_instances, 10);
-        assert_eq!(config.opencode_idle_timeout, Duration::from_millis(1800000));
+        assert_eq!(
+            config.opencode_idle_timeout,
+            Duration::from_millis(86400000)
+        );
         assert_eq!(config.opencode_port_start, 4100);
         assert_eq!(config.opencode_port_pool_size, 100);
         assert_eq!(
@@ -375,6 +378,7 @@ mod tests {
             config.opencode_startup_timeout,
             Duration::from_millis(60000)
         );
+        assert!(!config.opencode_data_path.to_string_lossy().contains("~"));
         assert_eq!(
             config.orchestrator_db_path,
             PathBuf::from("./data/orchestrator.db")
@@ -382,10 +386,9 @@ mod tests {
         assert_eq!(config.topic_db_path, PathBuf::from("./data/topics.db"));
         assert_eq!(config.log_db_path, PathBuf::from("./data/logs.db"));
         assert!(config.auto_create_project_dirs);
-        assert_eq!(config.api_port, 4200);
         assert!(config.handle_general_topic);
         assert!(config.telegram_allowed_users.is_empty());
-        assert!(config.api_key.is_none());
+        assert_eq!(config.telegram_chat_ids, vec![-1001234567890]);
         assert_eq!(config.docker_image, "ghcr.io/sst/opencode");
         assert!(!config.opencode_config_path.to_string_lossy().contains("~"));
         assert_eq!(config.container_port, 8080);
@@ -400,7 +403,7 @@ mod tests {
     fn test_duration_parsing() {
         clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
-        std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
+        std::env::set_var("TELEGRAM_CHAT_IDS", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
         std::env::set_var("OPENCODE_IDLE_TIMEOUT_MS", "5000");
         std::env::set_var("OPENCODE_HEALTH_CHECK_INTERVAL_MS", "15000");
@@ -424,7 +427,7 @@ mod tests {
     fn test_path_expansion() {
         clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
-        std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
+        std::env::set_var("TELEGRAM_CHAT_IDS", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
 
         let config = Config::from_env_no_dotenv().expect("Config should expand paths");
@@ -438,7 +441,7 @@ mod tests {
     fn test_telegram_allowed_users_parsing() {
         clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
-        std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
+        std::env::set_var("TELEGRAM_CHAT_IDS", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
         std::env::set_var("TELEGRAM_ALLOWED_USERS", "123,456,789");
 
@@ -452,7 +455,7 @@ mod tests {
     fn test_telegram_allowed_users_empty() {
         clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
-        std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
+        std::env::set_var("TELEGRAM_CHAT_IDS", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
         std::env::set_var("TELEGRAM_ALLOWED_USERS", "");
 
@@ -467,24 +470,22 @@ mod tests {
     fn test_masked_display() {
         clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "secret-token-12345");
-        std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
+        std::env::set_var("TELEGRAM_CHAT_IDS", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
-        std::env::set_var("API_KEY", "secret-api-key");
 
         let config = Config::from_env_no_dotenv().expect("Config should load");
         let display = config.to_string();
 
         assert!(display.contains("***MASKED***"));
         assert!(!display.contains("secret-token-12345"));
-        assert!(!display.contains("secret-api-key"));
     }
 
     #[test]
     #[serial]
-    fn test_invalid_telegram_chat_id() {
+    fn test_invalid_telegram_chat_ids() {
         clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
-        std::env::set_var("TELEGRAM_CHAT_ID", "not-a-number");
+        std::env::set_var("TELEGRAM_CHAT_IDS", "not-a-number");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
 
         let result = Config::from_env_no_dotenv();
@@ -492,7 +493,7 @@ mod tests {
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("TELEGRAM_CHAT_ID must be a valid integer"));
+            .contains("TELEGRAM_CHAT_IDS contains invalid integer"));
         clean_config_env();
     }
 
@@ -501,7 +502,7 @@ mod tests {
     fn test_invalid_opencode_max_instances() {
         clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
-        std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
+        std::env::set_var("TELEGRAM_CHAT_IDS", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
         std::env::set_var("OPENCODE_MAX_INSTANCES", "not-a-number");
 
@@ -516,20 +517,16 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_invalid_api_port() {
+    fn test_telegram_chat_ids_comma_separated() {
         clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
-        std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
+        std::env::set_var("TELEGRAM_CHAT_IDS", "-100123,-100456,-100789");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
-        std::env::set_var("API_PORT", "not-a-port");
 
-        let result = Config::from_env_no_dotenv();
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("API_PORT must be a valid port number"));
-        clean_config_env();
+        let config =
+            Config::from_env_no_dotenv().expect("Config should parse comma-separated chat IDs");
+
+        assert_eq!(config.telegram_chat_ids, vec![-100123, -100456, -100789]);
     }
 
     #[test]
@@ -537,7 +534,7 @@ mod tests {
     fn test_invalid_boolean_field() {
         clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
-        std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
+        std::env::set_var("TELEGRAM_CHAT_IDS", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
         std::env::set_var("HANDLE_GENERAL_TOPIC", "maybe");
 
@@ -555,7 +552,7 @@ mod tests {
     fn test_full_config_load() {
         clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz");
-        std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
+        std::env::set_var("TELEGRAM_CHAT_IDS", "-1001234567890,-1009876543210");
         std::env::set_var("TELEGRAM_ALLOWED_USERS", "111,222,333");
         std::env::set_var("HANDLE_GENERAL_TOPIC", "true");
         std::env::set_var("OPENCODE_PATH", "/usr/local/bin/opencode");
@@ -565,13 +562,12 @@ mod tests {
         std::env::set_var("OPENCODE_PORT_POOL_SIZE", "50");
         std::env::set_var("OPENCODE_HEALTH_CHECK_INTERVAL_MS", "45000");
         std::env::set_var("OPENCODE_STARTUP_TIMEOUT_MS", "90000");
+        std::env::set_var("OPENCODE_DATA_PATH", "~/custom/opencode-data");
         std::env::set_var("ORCHESTRATOR_DB_PATH", "./custom/orchestrator.db");
         std::env::set_var("TOPIC_DB_PATH", "./custom/topics.db");
         std::env::set_var("LOG_DB_PATH", "./custom/logs.db");
         std::env::set_var("PROJECT_BASE_PATH", "~/projects");
         std::env::set_var("AUTO_CREATE_PROJECT_DIRS", "false");
-        std::env::set_var("API_PORT", "8888");
-        std::env::set_var("API_KEY", "my-secret-key");
         std::env::set_var("OPENCODE_DOCKER_IMAGE", "custom/opencode:latest");
         std::env::set_var("OPENCODE_CONFIG_PATH", "~/myconfig");
         std::env::set_var("OPENCODE_CONTAINER_PORT", "9090");
@@ -583,7 +579,10 @@ mod tests {
             config.telegram_bot_token,
             "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
         );
-        assert_eq!(config.telegram_chat_id, -1001234567890);
+        assert_eq!(
+            config.telegram_chat_ids,
+            vec![-1001234567890, -1009876543210]
+        );
         assert_eq!(config.telegram_allowed_users, vec![111, 222, 333]);
         assert!(config.handle_general_topic);
         assert_eq!(
@@ -602,6 +601,7 @@ mod tests {
             config.opencode_startup_timeout,
             Duration::from_millis(90000)
         );
+        assert!(!config.opencode_data_path.to_string_lossy().contains("~"));
         assert_eq!(
             config.orchestrator_db_path,
             PathBuf::from("./custom/orchestrator.db")
@@ -609,8 +609,6 @@ mod tests {
         assert_eq!(config.topic_db_path, PathBuf::from("./custom/topics.db"));
         assert_eq!(config.log_db_path, PathBuf::from("./custom/logs.db"));
         assert!(!config.auto_create_project_dirs);
-        assert_eq!(config.api_port, 8888);
-        assert_eq!(config.api_key, Some("my-secret-key".to_string()));
         assert_eq!(config.docker_image, "custom/opencode:latest");
         assert!(!config.opencode_config_path.to_string_lossy().contains("~"));
         assert_eq!(config.container_port, 9090);
@@ -622,7 +620,7 @@ mod tests {
     fn test_invalid_container_port() {
         clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
-        std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
+        std::env::set_var("TELEGRAM_CHAT_IDS", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
         std::env::set_var("OPENCODE_CONTAINER_PORT", "not-a-port");
 
@@ -640,7 +638,7 @@ mod tests {
     fn test_env_passthrough_empty_string() {
         clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
-        std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
+        std::env::set_var("TELEGRAM_CHAT_IDS", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
         std::env::set_var("OPENCODE_ENV_PASSTHROUGH", "");
 
@@ -653,12 +651,27 @@ mod tests {
     fn test_opencode_config_path_tilde_expansion() {
         clean_config_env();
         std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
-        std::env::set_var("TELEGRAM_CHAT_ID", "-1001234567890");
+        std::env::set_var("TELEGRAM_CHAT_IDS", "-1001234567890");
         std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
         std::env::set_var("OPENCODE_CONFIG_PATH", "~/custom/config");
 
         let config = Config::from_env_no_dotenv().expect("Config should expand tilde");
         assert!(!config.opencode_config_path.to_string_lossy().contains("~"));
         assert!(!config.opencode_config_path.to_string_lossy().is_empty());
+    }
+
+    #[test]
+    #[serial]
+    fn test_is_whitelisted_chat() {
+        clean_config_env();
+        std::env::set_var("TELEGRAM_BOT_TOKEN", "test-token");
+        std::env::set_var("TELEGRAM_CHAT_IDS", "-100123,-100456");
+        std::env::set_var("PROJECT_BASE_PATH", "~/oc-bot");
+
+        let config = Config::from_env_no_dotenv().expect("Config should load");
+
+        assert!(config.is_whitelisted_chat(-100123));
+        assert!(config.is_whitelisted_chat(-100456));
+        assert!(!config.is_whitelisted_chat(-100789));
     }
 }
