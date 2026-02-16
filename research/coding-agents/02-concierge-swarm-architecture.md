@@ -15,34 +15,33 @@ A multi-agent coding system where a fast concierge handles user interaction whil
             ┌─────────────┐    ┌──────────────┐
             │  Concierge  │    │   Manager    │
             │ (fast model │    │  (steering)  │
-            │  read-only) │    └───┬──────┬───┘
-            └──────┬──────┘        │      │
-                   │          spawns/     │
-                   │ reads    steers      │ reads/writes
-                   │               │      │
-                   │          ┌────▼──────▼────┐
-                   │          │  Worker A..N   │
-                   │          │  (dynamic)     │
-                   │          └──┬──────────┬──┘
-                   │             │          │
-                   ▼             ▼          │
-            ┌─────────────────────────┐    │
-            │     Central Queue       │◄───┘
-            │  (all agents read/write │
-            │   except concierge:     │
-            │   read-only)            │
-            └─────────────────────────┘
-                         │
-                    Sub-agents
-                   (recursive, depth-limited)
+            │  read-only) │    └──────┬───────┘
+            └──────┬──────┘           │
+                   │                  │ spawns workers;
+                   │ reads            │ reads/writes queue
+                   │                  │
+                   │           ┌──────▼───────────────────┐
+                   └──────────►│      Central Queue       │
+                               │                          │◄──┐
+                               └──────────┬───────────────┘   │
+                                          │                    │
+                                    ┌─────▼─────┐      ┌──────┴────┐
+                                    │ Worker A  │      │ Worker N  │
+                                    │ (dynamic) │      │ (dynamic) │
+                                    └─────┬─────┘      └─────┬─────┘
+                                          │                   │
+                                    ┌─────▼─────┐      ┌─────▼─────┐
+                                    │ Sub-agent │      │ Sub-agent │
+                                    └───────────┘      └───────────┘
 ```
 
 Key topology:
 - **User → Concierge + Manager concurrently** (fan-out on input)
-- **Manager → Workers** (explicit control: spawn, steer, reassign)
-- **Workers ↔ Central Queue** (read/write for status, results, inter-agent comms)
-- **Concierge → Central Queue** (read-only, for status reporting)
-- **All agents → Queue** (source of truth for system state)
+- **Manager → Queue** (spawns workers, then steers them *indirectly* via addressed messages on the queue — no direct control connection)
+- **Workers ↔ Queue** (read addressed messages + write status/results; this is how they receive steering from the manager)
+- **Concierge → Queue** (read-only, for status reporting to user)
+- **Workers → Sub-agents** (explicit management; sub-agents are NOT connected to the central queue, only to their parent worker)
+- **Queue is the sole communication backbone** between manager, workers, and concierge
 
 ### Components
 
@@ -54,16 +53,21 @@ Key topology:
 
 **Manager** — Strong planning model, not necessarily the largest. Sole agent with full visibility into all agents and the complete queue. Responsibilities:
 - Decompose user requests into tasks
-- Spawn and steer top-level workers
+- Spawn top-level workers (the only direct control action)
+- Steer workers **indirectly** by posting addressed messages to the queue (e.g., reprioritize, reassign, provide context)
 - Maintain agent registry (who exists, what they're doing)
 - Resolve conflicts when workers flag disagreements
 - Selectively introduce agents to each other when collaboration is needed
 
-**Workers** — Specialized agents spawned by the manager. Can recursively spawn sub-agents up to a configurable depth limit. Each worker:
+The manager has **no direct runtime connection to workers**. All steering flows through the queue. This means workers can operate even if the manager is temporarily unavailable — they just won't receive new instructions until it's back.
+
+**Workers** — Specialized agents spawned by the manager. Connected to the central queue for receiving instructions and communicating with peers. Each worker:
 - Reads messages tagged to it + a compacted summary of the broader queue
 - Posts status updates and results to the queue
 - Can tag other workers it knows about
 - Has a dynamic role tied to its current task, not a fixed archetype
+- Can spawn and **directly manage** sub-agents (sub-agents are NOT connected to the central queue — they only communicate with their parent worker)
+- Recursive sub-agent spawning up to a configurable depth limit
 
 **Central Queue** — The shared communication backbone (see §3 for semantics).
 
