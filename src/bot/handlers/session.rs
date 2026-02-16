@@ -1,13 +1,4 @@
 //! /session command handler
-//!
-//! Displays session information for the current topic:
-//! - Instance type (Managed, Discovered, External)
-//! - Session ID
-//! - Project path
-//! - Port
-//! - Status
-//! - Streaming status
-//! - Creation timestamp
 
 use crate::bot::{BotState, Command};
 use crate::types::error::{OutpostError, Result};
@@ -91,9 +82,8 @@ fn format_timestamp(timestamp: i64) -> String {
 fn format_session_info(mapping: &TopicMapping, instance: Option<&InstanceInfo>) -> String {
     let mut output = String::from("Session Info\n\n");
 
-    // Type
+    // Instance info
     if let Some(inst) = instance {
-        output.push_str(&format!("Type: {:?}\n", inst.instance_type));
         output.push_str(&format!("Status: {:?}\n", inst.state));
         output.push_str(&format!("Port: {}\n", inst.port));
         if let Some(container_id) = &inst.container_id {
@@ -103,7 +93,6 @@ fn format_session_info(mapping: &TopicMapping, instance: Option<&InstanceInfo>) 
             ));
         }
     } else {
-        output.push_str("Type: (not available)\n");
         output.push_str("Status: (not available)\n");
         output.push_str("Port: (not available)\n");
     }
@@ -117,16 +106,6 @@ fn format_session_info(mapping: &TopicMapping, instance: Option<&InstanceInfo>) 
 
     // Project path
     output.push_str(&format!("Project: {}\n", mapping.project_path));
-
-    // Streaming
-    output.push_str(&format!(
-        "Streaming: {}\n",
-        if mapping.streaming_enabled {
-            "ON"
-        } else {
-            "OFF"
-        }
-    ));
 
     // Created timestamp
     let created = format_timestamp(mapping.created_at);
@@ -152,24 +131,21 @@ pub async fn handle_session(
     let chat_id = msg.chat.id;
 
     // Get topic mapping
-    let topic_store = state.topic_store.lock().await;
-    let mapping = topic_store
-        .get_mapping(topic_id)
+    let mapping = state
+        .topic_store
+        .get_mapping(chat_id.0, topic_id)
         .await
         .map_err(|e| OutpostError::database_error(e.to_string()))?
         .ok_or_else(|| OutpostError::telegram_error("No active connection in this topic"))?;
-    drop(topic_store);
     debug!(topic_id = topic_id, session_id = ?mapping.session_id, instance_id = ?mapping.instance_id, "Mapping found for session info");
 
     // Get instance info if available
     let instance = if let Some(instance_id) = &mapping.instance_id {
-        let store = state.orchestrator_store.lock().await;
-        let inst = store
+        state
+            .orchestrator_store
             .get_instance(instance_id)
             .await
-            .map_err(|e| OutpostError::database_error(e.to_string()))?;
-        drop(store);
-        inst
+            .map_err(|e| OutpostError::database_error(e.to_string()))?
     } else {
         None
     };
@@ -191,7 +167,7 @@ pub async fn handle_session(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::instance::{InstanceState, InstanceType};
+    use crate::types::instance::InstanceState;
 
     #[test]
     fn test_format_with_all_fields() {
@@ -201,7 +177,6 @@ mod tests {
             project_path: "/home/user/my-project".to_string(),
             session_id: Some("ses_abc123456".to_string()),
             instance_id: Some("inst_001".to_string()),
-            streaming_enabled: true,
             topic_name_updated: false,
             created_at: 1640000000,
             updated_at: 1640000100,
@@ -210,24 +185,22 @@ mod tests {
         let instance = InstanceInfo {
             id: "inst_001".to_string(),
             state: InstanceState::Running,
-            instance_type: InstanceType::Managed,
             project_path: "/home/user/my-project".to_string(),
             port: 4101,
             pid: Some(12345),
             container_id: None,
             started_at: Some(1640000000),
             stopped_at: None,
+            topic_id: 123,
         };
 
         let output = format_session_info(&mapping, Some(&instance));
 
         assert!(output.contains("Session Info"));
-        assert!(output.contains("Type: Managed"));
         assert!(output.contains("Status: Running"));
         assert!(output.contains("Port: 4101"));
         assert!(output.contains("Session: ses_abc123456"));
         assert!(output.contains("Project: /home/user/my-project"));
-        assert!(output.contains("Streaming: ON"));
         assert!(output.contains("Created: 2021-12-20"));
     }
 
@@ -239,7 +212,6 @@ mod tests {
             project_path: "/home/user/my-project".to_string(),
             session_id: None,
             instance_id: None,
-            streaming_enabled: false,
             topic_name_updated: false,
             created_at: 1640000000,
             updated_at: 1640000100,
@@ -248,12 +220,10 @@ mod tests {
         let output = format_session_info(&mapping, None);
 
         assert!(output.contains("Session Info"));
-        assert!(output.contains("Type: (not available)"));
         assert!(output.contains("Status: (not available)"));
         assert!(output.contains("Port: (not available)"));
         assert!(output.contains("Session: (not available)"));
         assert!(output.contains("Project: /home/user/my-project"));
-        assert!(output.contains("Streaming: OFF"));
         assert!(output.contains("Created: 2021-12-20"));
     }
 
@@ -265,7 +235,6 @@ mod tests {
             project_path: "/another/path".to_string(),
             session_id: Some("ses_xyz789".to_string()),
             instance_id: Some("inst_002".to_string()),
-            streaming_enabled: true,
             topic_name_updated: true,
             created_at: 1650000000,
             updated_at: 1650000200,
@@ -274,52 +243,30 @@ mod tests {
         let instance = InstanceInfo {
             id: "inst_002".to_string(),
             state: InstanceState::Stopped,
-            instance_type: InstanceType::Discovered,
             project_path: "/another/path".to_string(),
             port: 4102,
             pid: None,
             container_id: None,
             started_at: None,
             stopped_at: Some(1650000200),
+            topic_id: 456,
         };
 
         let output = format_session_info(&mapping, Some(&instance));
 
-        assert!(output.contains("Type: Discovered"));
         assert!(output.contains("Status: Stopped"));
         assert!(output.contains("Port: 4102"));
         assert!(output.contains("Session: ses_xyz789"));
-        assert!(output.contains("Streaming: ON"));
     }
 
     #[test]
-    fn test_timestamp_formatting() {
-        let mapping = TopicMapping {
-            topic_id: 789,
-            chat_id: -1001111111111,
-            project_path: "/test/path".to_string(),
-            session_id: Some("ses_test".to_string()),
-            instance_id: None,
-            streaming_enabled: false,
-            topic_name_updated: false,
-            created_at: 1609459200, // 2021-01-01 00:00:00 UTC
-            updated_at: 1609459200,
-        };
-
-        let output = format_session_info(&mapping, None);
-
-        assert!(output.contains("Created: 2021-01-01"));
-    }
-
-    #[test]
-    fn test_format_external_instance() {
+    fn test_format_without_container() {
         let mapping = TopicMapping {
             topic_id: 999,
             chat_id: -1002222222222,
             project_path: "/external/project".to_string(),
             session_id: Some("ses_ext123".to_string()),
             instance_id: Some("inst_ext".to_string()),
-            streaming_enabled: false,
             topic_name_updated: false,
             created_at: 1660000000,
             updated_at: 1660000300,
@@ -328,22 +275,20 @@ mod tests {
         let instance = InstanceInfo {
             id: "inst_ext".to_string(),
             state: InstanceState::Running,
-            instance_type: InstanceType::External,
             project_path: "/external/project".to_string(),
             port: 4103,
             pid: None,
             container_id: None,
             started_at: None,
             stopped_at: None,
+            topic_id: 999,
         };
 
         let output = format_session_info(&mapping, Some(&instance));
 
-        assert!(output.contains("Type: External"));
         assert!(output.contains("Status: Running"));
         assert!(output.contains("Port: 4103"));
         assert!(output.contains("Session: ses_ext123"));
-        assert!(output.contains("Streaming: OFF"));
         assert!(!output.contains("Container:"));
     }
 
@@ -355,7 +300,6 @@ mod tests {
             project_path: "/docker/project".to_string(),
             session_id: Some("ses_docker".to_string()),
             instance_id: Some("inst_docker".to_string()),
-            streaming_enabled: false,
             topic_name_updated: false,
             created_at: 1660000000,
             updated_at: 1660000300,
@@ -364,13 +308,13 @@ mod tests {
         let instance = InstanceInfo {
             id: "inst_docker".to_string(),
             state: InstanceState::Running,
-            instance_type: InstanceType::Managed,
             project_path: "/docker/project".to_string(),
             port: 4104,
             pid: None,
             container_id: Some("a1b2c3d4e5f6789012345678".to_string()),
             started_at: Some(1660000000),
             stopped_at: None,
+            topic_id: 111,
         };
 
         let output = format_session_info(&mapping, Some(&instance));

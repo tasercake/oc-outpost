@@ -4,11 +4,10 @@ use crate::orchestrator::manager::InstanceManager;
 use crate::orchestrator::store::OrchestratorStore;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::Mutex;
 
 pub struct BotState {
-    pub orchestrator_store: Arc<Mutex<OrchestratorStore>>,
-    pub topic_store: Arc<Mutex<TopicStore>>,
+    pub orchestrator_store: Arc<OrchestratorStore>,
+    pub topic_store: Arc<TopicStore>,
     pub config: Arc<Config>,
     pub instance_manager: Arc<InstanceManager>,
     pub bot_start_time: Instant,
@@ -23,8 +22,8 @@ impl BotState {
         bot_start_time: Instant,
     ) -> Self {
         Self {
-            orchestrator_store: Arc::new(Mutex::new(orchestrator_store)),
-            topic_store: Arc::new(Mutex::new(topic_store)),
+            orchestrator_store: Arc::new(orchestrator_store),
+            topic_store: Arc::new(topic_store),
             config: Arc::new(config),
             instance_manager: Arc::new(instance_manager),
             bot_start_time,
@@ -46,7 +45,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = Config {
             telegram_bot_token: "test_token".to_string(),
-            telegram_chat_id: -1001234567890,
+            telegram_chat_ids: vec![-1001234567890],
             telegram_allowed_users: vec![],
             handle_general_topic: true,
             opencode_path: PathBuf::from("opencode"),
@@ -56,13 +55,12 @@ mod tests {
             opencode_port_pool_size: 100,
             opencode_health_check_interval: Duration::from_secs(30),
             opencode_startup_timeout: Duration::from_secs(60),
+            opencode_data_path: PathBuf::from("/tmp/opencode-data"),
             orchestrator_db_path: temp_dir.path().join("orchestrator.db"),
             topic_db_path: temp_dir.path().join("topics.db"),
             log_db_path: temp_dir.path().join("logs.db"),
             project_base_path: temp_dir.path().to_path_buf(),
             auto_create_project_dirs: true,
-            api_port: 4200,
-            api_key: None,
             docker_image: "ghcr.io/sst/opencode".to_string(),
             opencode_config_path: PathBuf::from("/tmp/oc-config"),
             container_port: 8080,
@@ -101,7 +99,7 @@ mod tests {
             bot_start_time,
         );
 
-        assert_eq!(state.config.telegram_chat_id, -1001234567890);
+        assert_eq!(state.config.telegram_chat_ids, vec![-1001234567890]);
         assert_eq!(state.config.opencode_max_instances, 10);
     }
 
@@ -135,8 +133,9 @@ mod tests {
             bot_start_time,
         );
 
-        let _orchestrator = state.orchestrator_store.lock().await;
-        let _topics = state.topic_store.lock().await;
+        // Stores are directly accessible (no lock needed)
+        let _orchestrator = &state.orchestrator_store;
+        let _topics = &state.topic_store;
     }
 
     #[tokio::test]
@@ -170,6 +169,9 @@ mod tests {
         );
 
         let config_clone = Arc::clone(&state.config);
-        assert_eq!(config_clone.telegram_chat_id, state.config.telegram_chat_id);
+        assert_eq!(
+            config_clone.telegram_chat_ids,
+            state.config.telegram_chat_ids
+        );
     }
 }

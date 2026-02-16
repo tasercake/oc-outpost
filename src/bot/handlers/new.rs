@@ -143,16 +143,22 @@ pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotStat
     debug!(topic_id = forum_topic.thread_id.0.0, name = %name, "Forum topic created");
 
     // Spawn OpenCode instance via InstanceManager
-    let instance_lock = state
+    let topic_id = forum_topic.thread_id.0 .0;
+    let _instance = state
         .instance_manager
-        .get_or_create(&effective_project_path)
+        .get_or_create(&effective_project_path, topic_id)
         .await
         .map_err(|e| OutpostError::io_error(format!("Failed to spawn instance: {}", e)))?;
 
-    let inst = instance_lock.lock().await;
-    let instance_id = inst.id().to_string();
-    let port = inst.port();
-    drop(inst);
+    let path_str = effective_project_path.to_string_lossy();
+    let info = state
+        .orchestrator_store
+        .get_instance_by_path(&path_str)
+        .await
+        .map_err(|e| OutpostError::database_error(e.to_string()))?
+        .ok_or_else(|| OutpostError::io_error("Instance created but not found in store"))?;
+    let instance_id = info.id;
+    let port = info.port;
     debug!(instance_id = %instance_id, port = port, "Instance spawned for project");
 
     // Get timestamp
@@ -163,23 +169,21 @@ pub async fn handle_new(bot: Bot, msg: Message, cmd: Command, state: Arc<BotStat
 
     // Create and save TopicMapping with real instance_id
     let mapping = TopicMapping {
-        topic_id: forum_topic.thread_id.0 .0,
+        topic_id,
         chat_id: msg.chat.id.0,
         project_path: effective_project_path.to_string_lossy().to_string(),
         session_id: None,
         instance_id: Some(instance_id.clone()),
-        streaming_enabled: false,
         topic_name_updated: false,
         created_at: now,
         updated_at: now,
     };
-    debug!(topic_id = mapping.topic_id, session_id = ?mapping.session_id, instance_id = ?mapping.instance_id, project_path = %mapping.project_path, "TopicMapping created — NOTE: session_id is None, will be set on /connect or session discovery");
-    let topic_store = state.topic_store.lock().await;
-    topic_store
+    debug!(topic_id = mapping.topic_id, instance_id = ?mapping.instance_id, project_path = %mapping.project_path, "TopicMapping created, session_id will be set when OpenCode session starts");
+    state
+        .topic_store
         .save_mapping(&mapping)
         .await
         .map_err(|e| OutpostError::database_error(e.to_string()))?;
-    drop(topic_store);
     debug!(
         topic_id = mapping.topic_id,
         "TopicMapping saved to database"

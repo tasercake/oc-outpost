@@ -35,13 +35,12 @@ pub async fn handle_close(
 
     let topic_id = get_topic_id(&msg)?;
 
-    let topic_store = state.topic_store.lock().await;
-    let _mapping = topic_store
-        .get_mapping(topic_id)
+    let _mapping = state
+        .topic_store
+        .get_mapping(msg.chat.id.0, topic_id)
         .await
         .map_err(|e| OutpostError::database_error(e.to_string()))?
         .ok_or_else(|| OutpostError::telegram_error("No active connection in this topic"))?;
-    drop(topic_store);
 
     let keyboard = InlineKeyboardMarkup::new(vec![vec![
         InlineKeyboardButton::callback("✅ Confirm", format!("close:{}:confirm", topic_id)),
@@ -113,9 +112,12 @@ pub async fn handle_close_callback(bot: Bot, q: CallbackQuery, state: Arc<BotSta
             ));
         };
 
-        let topic_store = state.topic_store.lock().await;
-        let mapping = topic_store.get_mapping(topic_id).await.ok().flatten();
-        drop(topic_store);
+        let mapping = state
+            .topic_store
+            .get_mapping(chat_id.0, topic_id)
+            .await
+            .ok()
+            .flatten();
 
         if let Some(mapping) = mapping {
             if let Some(instance_id) = &mapping.instance_id {
@@ -148,11 +150,9 @@ pub async fn handle_close_callback(bot: Bot, q: CallbackQuery, state: Arc<BotSta
             }
         }
 
-        let topic_store = state.topic_store.lock().await;
-        if let Err(e) = topic_store.delete_mapping(topic_id).await {
+        if let Err(e) = state.topic_store.delete_mapping(chat_id.0, topic_id).await {
             warn!(error = %e, "Failed to delete topic mapping during close");
         }
-        drop(topic_store);
 
         if let Err(e) = bot
             .delete_forum_topic(chat_id, ThreadId(MessageId(topic_id)))
@@ -182,7 +182,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = Config {
             telegram_bot_token: "test_token".to_string(),
-            telegram_chat_id: -1001234567890,
+            telegram_chat_ids: vec![-1001234567890],
             telegram_allowed_users: vec![],
             handle_general_topic: true,
             opencode_path: PathBuf::from("opencode"),
@@ -192,13 +192,12 @@ mod tests {
             opencode_port_pool_size: 100,
             opencode_health_check_interval: Duration::from_secs(30),
             opencode_startup_timeout: Duration::from_secs(60),
+            opencode_data_path: PathBuf::from("/tmp/opencode-data"),
             orchestrator_db_path: temp_dir.path().join("orchestrator.db"),
             topic_db_path: temp_dir.path().join("topics.db"),
             log_db_path: temp_dir.path().join("logs.db"),
             project_base_path: temp_dir.path().to_path_buf(),
             auto_create_project_dirs: true,
-            api_port: 4200,
-            api_key: None,
             docker_image: "ghcr.io/sst/opencode".to_string(),
             opencode_config_path: PathBuf::from("/tmp/oc-config"),
             container_port: 8080,
@@ -350,27 +349,31 @@ mod tests {
             project_path: "/test/project".to_string(),
             session_id: Some("ses_test".to_string()),
             instance_id: Some("inst_test".to_string()),
-            streaming_enabled: false,
             topic_name_updated: false,
             created_at: now,
             updated_at: now,
         };
 
-        let topic_store = state.topic_store.lock().await;
-        topic_store.save_mapping(&mapping).await.unwrap();
-        drop(topic_store);
+        state.topic_store.save_mapping(&mapping).await.unwrap();
 
-        let topic_store = state.topic_store.lock().await;
-        let result = topic_store.get_mapping(456).await.unwrap();
+        let result = state
+            .topic_store
+            .get_mapping(-1001234567890, 456)
+            .await
+            .unwrap();
         assert!(result.is_some());
-        drop(topic_store);
 
-        let topic_store = state.topic_store.lock().await;
-        topic_store.delete_mapping(456).await.unwrap();
-        drop(topic_store);
+        state
+            .topic_store
+            .delete_mapping(-1001234567890, 456)
+            .await
+            .unwrap();
 
-        let topic_store = state.topic_store.lock().await;
-        let result = topic_store.get_mapping(456).await.unwrap();
+        let result = state
+            .topic_store
+            .get_mapping(-1001234567890, 456)
+            .await
+            .unwrap();
         assert!(result.is_none());
     }
 

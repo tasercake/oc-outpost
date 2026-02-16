@@ -1,14 +1,7 @@
 //! /status command handler
-//!
-//! Displays orchestrator status:
-//! - Managed/Discovered/External instance counts
-//! - Port pool usage
-//! - Uptime
-//! - Health status
 
 use crate::bot::{BotState, Command};
 use crate::types::error::{OutpostError, Result};
-use crate::types::instance::InstanceType;
 use std::sync::Arc;
 use teloxide::prelude::*;
 use tracing::debug;
@@ -27,22 +20,14 @@ fn format_uptime(seconds: u64) -> String {
 
 /// Format status output for display
 fn format_status_output(
-    managed_count: usize,
-    discovered_count: usize,
-    external_count: usize,
+    total_count: usize,
     port_used: usize,
     port_total: usize,
     uptime_seconds: u64,
 ) -> String {
     let mut output = String::from("Orchestrator Status\n\n");
 
-    output.push_str(&format!(
-        "Managed Instances: {}/{}\n",
-        managed_count,
-        managed_count + discovered_count + external_count
-    ));
-    output.push_str(&format!("Discovered Sessions: {}\n", discovered_count));
-    output.push_str(&format!("External Instances: {}\n", external_count));
+    output.push_str(&format!("Active Instances: {}\n", total_count));
     output.push('\n');
     output.push_str(&format!("Port Pool: {}/{} used\n", port_used, port_total));
     output.push_str(&format!("Uptime: {}\n", format_uptime(uptime_seconds)));
@@ -67,33 +52,16 @@ pub async fn handle_status(
     let chat_id = msg.chat.id;
 
     // Get orchestrator store
-    let store = state.orchestrator_store.lock().await;
-    let all_instances = store
+    let all_instances = state
+        .orchestrator_store
         .get_all_instances()
         .await
         .map_err(|e| OutpostError::database_error(e.to_string()))?;
-    drop(store);
 
-    // Count instances by type
-    let managed_count = all_instances
-        .iter()
-        .filter(|i| i.instance_type == InstanceType::Managed)
-        .count();
-    let discovered_count = all_instances
-        .iter()
-        .filter(|i| i.instance_type == InstanceType::Discovered)
-        .count();
-    let external_count = all_instances
-        .iter()
-        .filter(|i| i.instance_type == InstanceType::External)
-        .count();
+    // Count instances
+    let total_count = all_instances.len();
 
-    debug!(
-        managed_count = managed_count,
-        discovered_count = discovered_count,
-        external_count = external_count,
-        "Instance counts by type"
-    );
+    debug!(total_count = total_count, "Instance count");
 
     // Get port pool usage from InstanceManager
     let manager_status = state.instance_manager.get_status().await;
@@ -108,14 +76,7 @@ pub async fn handle_status(
     let uptime_seconds = state.bot_start_time.elapsed().as_secs();
 
     // Format and send message
-    let output = format_status_output(
-        managed_count,
-        discovered_count,
-        external_count,
-        port_used,
-        port_total,
-        uptime_seconds,
-    );
+    let output = format_status_output(total_count, port_used, port_total, uptime_seconds);
 
     bot.send_message(chat_id, output)
         .await
@@ -158,12 +119,10 @@ mod tests {
 
     #[test]
     fn test_format_status_output_basic() {
-        let output = format_status_output(3, 2, 1, 4, 100, 8100);
+        let output = format_status_output(3, 4, 100, 8100);
 
         assert!(output.contains("Orchestrator Status"));
-        assert!(output.contains("Managed Instances: 3/6"));
-        assert!(output.contains("Discovered Sessions: 2"));
-        assert!(output.contains("External Instances: 1"));
+        assert!(output.contains("Active Instances: 3"));
         assert!(output.contains("Port Pool: 4/100 used"));
         assert!(output.contains("Uptime: 2h 15m"));
         assert!(output.contains("Health: Healthy"));
@@ -171,33 +130,27 @@ mod tests {
 
     #[test]
     fn test_format_status_output_no_instances() {
-        let output = format_status_output(0, 0, 0, 0, 100, 300);
+        let output = format_status_output(0, 0, 100, 300);
 
-        assert!(output.contains("Managed Instances: 0/0"));
-        assert!(output.contains("Discovered Sessions: 0"));
-        assert!(output.contains("External Instances: 0"));
+        assert!(output.contains("Active Instances: 0"));
         assert!(output.contains("Port Pool: 0/100 used"));
         assert!(output.contains("Uptime: 5m"));
     }
 
     #[test]
-    fn test_format_status_output_all_managed() {
-        let output = format_status_output(10, 0, 0, 10, 100, 3600);
+    fn test_format_status_output_all_active() {
+        let output = format_status_output(10, 10, 100, 3600);
 
-        assert!(output.contains("Managed Instances: 10/10"));
-        assert!(output.contains("Discovered Sessions: 0"));
-        assert!(output.contains("External Instances: 0"));
+        assert!(output.contains("Active Instances: 10"));
         assert!(output.contains("Port Pool: 10/100 used"));
         assert!(output.contains("Uptime: 1h 0m"));
     }
 
     #[test]
-    fn test_format_status_output_mixed_instances() {
-        let output = format_status_output(5, 3, 2, 8, 100, 7200);
+    fn test_format_status_output_mixed() {
+        let output = format_status_output(5, 8, 100, 7200);
 
-        assert!(output.contains("Managed Instances: 5/10"));
-        assert!(output.contains("Discovered Sessions: 3"));
-        assert!(output.contains("External Instances: 2"));
+        assert!(output.contains("Active Instances: 5"));
         assert!(output.contains("Port Pool: 8/100 used"));
         assert!(output.contains("Uptime: 2h 0m"));
     }

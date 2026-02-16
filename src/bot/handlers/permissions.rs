@@ -80,8 +80,8 @@ pub async fn handle_permission_callback(
     let allow = action == "allow";
 
     // Look up the instance port from the session_id
-    let topic_store = state.topic_store.lock().await;
-    let mapping = topic_store
+    let mapping = state
+        .topic_store
         .get_mapping_by_session(&session_id)
         .await
         .map_err(|e| OutpostError::telegram_error(format!("Failed to look up session: {}", e)))?
@@ -92,17 +92,13 @@ pub async fn handle_permission_callback(
         .instance_id
         .ok_or_else(|| OutpostError::telegram_error("Instance ID not found for session"))?;
 
-    drop(topic_store);
-
     // Look up the instance port from the orchestrator store
-    let orchestrator_store = state.orchestrator_store.lock().await;
-    let instance = orchestrator_store
+    let instance = state
+        .orchestrator_store
         .get_instance(&instance_id)
         .await
         .map_err(|e| OutpostError::telegram_error(format!("Failed to look up instance: {}", e)))?
         .ok_or_else(|| OutpostError::telegram_error("Instance not found"))?;
-
-    drop(orchestrator_store);
 
     let client = OpenCodeClient::new(&format!("http://localhost:{}", instance.port));
     client

@@ -24,7 +24,7 @@ fn format_projects(dirs: Vec<String>, base_path: &str) -> String {
 }
 
 /// List project directories from the filesystem
-fn list_project_dirs(base_path: &std::path::PathBuf) -> Vec<String> {
+pub(crate) fn list_project_dirs(base_path: &std::path::PathBuf) -> Vec<String> {
     match std::fs::read_dir(base_path) {
         Ok(entries) => {
             let mut dirs: Vec<String> = entries
