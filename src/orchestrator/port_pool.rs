@@ -86,6 +86,7 @@ impl PortPool {
     /// # Returns
     /// * `true` - Port is free (no process listening)
     /// * `false` - Port is in use
+    #[allow(dead_code)]
     pub async fn is_available(&self, port: u16) -> bool {
         // Check if port is allocated in our pool
         {

@@ -14,7 +14,7 @@ use crate::orchestrator::container::{ContainerConfig, ContainerRuntime};
 use crate::orchestrator::instance::OpenCodeInstance;
 use crate::orchestrator::port_pool::PortPool;
 use crate::orchestrator::store::OrchestratorStore;
-use crate::types::instance::{InstanceConfig, InstanceInfo, InstanceState, InstanceType};
+use crate::types::instance::{InstanceConfig, InstanceInfo, InstanceState};
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::path::Path;
@@ -120,12 +120,16 @@ impl InstanceManager {
     /// 3. If exists but stopped, restart it
     /// 4. If not exists, allocate port and spawn new
     /// 5. Save to database
-    pub async fn get_or_create(&self, project_path: &Path) -> Result<Arc<Mutex<OpenCodeInstance>>> {
+    pub async fn get_or_create(
+        &self,
+        project_path: &Path,
+        topic_id: i32,
+    ) -> Result<Arc<Mutex<OpenCodeInstance>>> {
         let path_str = project_path
             .to_str()
             .ok_or_else(|| anyhow!("Invalid project path"))?;
 
-        debug!(project_path = %path_str, "get_or_create: looking up instance");
+        debug!(project_path = %path_str, topic_id = topic_id, "get_or_create: looking up instance");
 
         // Check if instance already exists in memory
         if let Some(instance) = self.get_instance_by_path(project_path).await {
@@ -153,12 +157,9 @@ impl InstanceManager {
         let store = self.store.lock().await;
         if let Some(info) = store.get_instance_by_path(path_str).await? {
             debug!(project_path = %path_str, instance_id = %info.id, state = ?info.state, "Found instance in database but not memory");
+            // Instance exists in DB but not in memory - spawn new (containers don't survive)
             drop(store);
-            // Instance exists in DB but not in memory, try to recover
-            if info.state == InstanceState::Running || info.state == InstanceState::Starting {
-                // Try to restore from DB
-                return self.restore_instance(&info).await;
-            }
+            return self.spawn_new_instance(project_path, topic_id).await;
         } else {
             debug!(project_path = %path_str, "No instance found in memory or database");
             drop(store);
@@ -181,7 +182,7 @@ impl InstanceManager {
 
         // Create new instance
         debug!(project_path = %path_str, "Spawning new instance");
-        self.spawn_new_instance(project_path).await
+        self.spawn_new_instance(project_path, topic_id).await
     }
 
     /// Get an instance by ID.
@@ -306,12 +307,11 @@ impl InstanceManager {
 
     /// Recover instances from database after restart.
     ///
-    /// Attempts to restore instances that were running before shutdown.
+    /// Marks all running instances as stopped (containers don't survive bot restart).
     pub async fn recover_from_db(&self) -> Result<()> {
         debug!("Starting instance recovery from database");
         let store = self.store.lock().await;
         let all_instances = store.get_all_instances().await?;
-        drop(store);
 
         debug!(
             instance_count = all_instances.len(),
@@ -321,17 +321,9 @@ impl InstanceManager {
         for info in all_instances {
             debug!(instance_id = %info.id, state = ?info.state, "Evaluating instance for recovery");
             if info.state == InstanceState::Running || info.state == InstanceState::Starting {
-                // Try to restore instance
-                if let Err(e) = self.restore_instance(&info).await {
-                    tracing::warn!(
-                        "Failed to restore instance {}: {}. Marking as stopped.",
-                        info.id,
-                        e
-                    );
-                    // Mark as stopped in database
-                    let store = self.store.lock().await;
-                    let _ = store.update_state(&info.id, InstanceState::Stopped).await;
-                }
+                // Mark as stopped (containers don't survive bot restart)
+                debug!(instance_id = %info.id, "Marking previously running instance as stopped");
+                let _ = store.update_state(&info.id, InstanceState::Stopped).await;
             }
         }
 
@@ -463,10 +455,12 @@ impl InstanceManager {
                                     );
                                     tokio::time::sleep(delay).await;
 
-                                    let project_path = {
+                                    let (project_path, topic_id) = {
                                         let store_guard = store.lock().await;
                                         match store_guard.get_instance(&id).await {
-                                            Ok(Some(info)) => info.project_path.clone(),
+                                            Ok(Some(info)) => {
+                                                (info.project_path.clone(), info.topic_id)
+                                            }
                                             _ => {
                                                 tracing::error!(
                                                     "Failed to get instance info for restart of {}",
@@ -513,7 +507,6 @@ impl InstanceManager {
                                     );
                                     let instance_config = InstanceConfig {
                                         id: new_id.clone(),
-                                        instance_type: InstanceType::Managed,
                                         project_path: project_path.clone(),
                                         port: new_port,
                                         auto_start: true,
@@ -533,6 +526,11 @@ impl InstanceManager {
                                             .opencode_config_path
                                             .to_string_lossy()
                                             .to_string(),
+                                        opencode_data_path: config
+                                            .opencode_data_path
+                                            .to_string_lossy()
+                                            .to_string(),
+                                        topic_id,
                                         env_vars: config.env_passthrough.clone(),
                                     };
 
@@ -561,7 +559,6 @@ impl InstanceManager {
                                                     let info = InstanceInfo {
                                                         id: new_id.clone(),
                                                         state: InstanceState::Running,
-                                                        instance_type: InstanceType::Managed,
                                                         project_path: project_path.clone(),
                                                         port: new_port,
                                                         pid: None,
@@ -576,6 +573,7 @@ impl InstanceManager {
                                                                 as i64,
                                                         ),
                                                         stopped_at: None,
+                                                        topic_id,
                                                     };
 
                                                     {
@@ -738,6 +736,7 @@ impl InstanceManager {
     async fn spawn_new_instance(
         &self,
         project_path: &Path,
+        topic_id: i32,
     ) -> Result<Arc<Mutex<OpenCodeInstance>>> {
         let path_str = project_path
             .to_str()
@@ -757,7 +756,6 @@ impl InstanceManager {
         // Create config
         let instance_config = InstanceConfig {
             id: id.clone(),
-            instance_type: InstanceType::Managed,
             project_path: path_str.to_string(),
             port,
             auto_start: true,
@@ -775,6 +773,8 @@ impl InstanceManager {
                 .opencode_config_path
                 .to_string_lossy()
                 .to_string(),
+            opencode_data_path: self.config.opencode_data_path.to_string_lossy().to_string(),
+            topic_id,
             env_vars: self.config.env_passthrough.clone(),
         };
 
@@ -823,7 +823,6 @@ impl InstanceManager {
         let info = InstanceInfo {
             id: id.clone(),
             state: InstanceState::Running,
-            instance_type: InstanceType::Managed,
             project_path: path_str.to_string(),
             port,
             pid: None,
@@ -835,6 +834,7 @@ impl InstanceManager {
                     .as_secs() as i64,
             ),
             stopped_at: None,
+            topic_id,
         };
 
         let store = self.store.lock().await;
@@ -878,6 +878,17 @@ impl InstanceManager {
 
         debug!(instance_id = %id, old_port = old_port, "Found instance to restart");
 
+        // Get topic_id from store
+        let topic_id = {
+            let store = self.store.lock().await;
+            match store.get_instance(&id).await {
+                Ok(Some(info)) => info.topic_id,
+                _ => {
+                    return Err(anyhow!("Failed to get instance info for restart of {}", id));
+                }
+            }
+        };
+
         // Check restart tracker
         let mut trackers = self.restart_trackers.lock().await;
         let tracker = trackers.entry(id.clone()).or_default();
@@ -907,51 +918,7 @@ impl InstanceManager {
 
         self.port_pool.release(old_port).await;
 
-        self.spawn_new_instance(project_path).await
-    }
-
-    /// Restore an instance from database info.
-    async fn restore_instance(&self, info: &InstanceInfo) -> Result<Arc<Mutex<OpenCodeInstance>>> {
-        debug!(instance_id = %info.id, port = info.port, "Attempting instance restore");
-        let project_path = Path::new(&info.project_path);
-
-        // Check if port is available
-        debug!(port = info.port, "Checking port availability for restore");
-        if !self.port_pool.is_available(info.port).await {
-            // Port is in use, need to allocate new port
-            return self.spawn_new_instance(project_path).await;
-        }
-
-        // Try to create external instance (process might still be running)
-        let instance_config = InstanceConfig {
-            id: info.id.clone(),
-            instance_type: info.instance_type.clone(),
-            project_path: info.project_path.clone(),
-            port: info.port,
-            auto_start: true,
-            opencode_path: self.config.opencode_path.to_string_lossy().to_string(),
-        };
-
-        let instance = OpenCodeInstance::external(instance_config, info.port, info.pid)?;
-
-        // Check health
-        if instance.health_check().await? {
-            // Instance is still running
-            debug!(instance_id = %info.id, "Restored instance healthy");
-            let instance = Arc::new(Mutex::new(instance));
-            let mut instances = self.instances.lock().await;
-            instances.insert(info.id.clone(), instance.clone());
-
-            // Initialize activity tracker
-            let mut activity_trackers = self.activity_trackers.lock().await;
-            activity_trackers.insert(info.id.clone(), ActivityTracker::default());
-
-            Ok(instance)
-        } else {
-            // Instance is not running, spawn new
-            debug!(instance_id = %info.id, "Restored instance unhealthy, spawning new");
-            self.spawn_new_instance(project_path).await
-        }
+        self.spawn_new_instance(project_path, topic_id).await
     }
 }
 
@@ -969,7 +936,7 @@ mod tests {
         // Create minimal config
         let config = Config {
             telegram_bot_token: "test".to_string(),
-            telegram_chat_id: -1001234567890,
+            telegram_chat_ids: vec![-1001234567890],
             telegram_allowed_users: vec![],
             handle_general_topic: true,
             opencode_path: std::path::PathBuf::from("/nonexistent/opencode-test-binary"),
@@ -979,13 +946,12 @@ mod tests {
             opencode_port_pool_size: 10,
             opencode_health_check_interval: Duration::from_secs(30),
             opencode_startup_timeout: Duration::from_secs(5),
+            opencode_data_path: std::path::PathBuf::from("/tmp/opencode-data"),
             orchestrator_db_path: db_path.clone(),
             topic_db_path: temp_dir.path().join("topics.db"),
             log_db_path: temp_dir.path().join("logs.db"),
             project_base_path: temp_dir.path().to_path_buf(),
             auto_create_project_dirs: true,
-            api_port: 4200,
-            api_key: None,
             docker_image: "ghcr.io/sst/opencode".to_string(),
             opencode_config_path: std::path::PathBuf::from("/tmp/oc-config"),
             container_port: 8080,
@@ -1091,13 +1057,13 @@ mod tests {
         let info = InstanceInfo {
             id: "inst-missing".to_string(),
             state: InstanceState::Running,
-            instance_type: InstanceType::Managed,
             project_path: "/tmp/project".to_string(),
             port: 14101,
             pid: None,
             container_id: Some("missing-container".to_string()),
             started_at: None,
             stopped_at: None,
+            topic_id: 999,
         };
 
         {
@@ -1127,13 +1093,13 @@ mod tests {
         let info = InstanceInfo {
             id: "inst-match".to_string(),
             state: InstanceState::Running,
-            instance_type: InstanceType::Managed,
             project_path: "/tmp/project".to_string(),
             port: 14102,
             pid: None,
             container_id: Some("match-1".to_string()),
             started_at: None,
             stopped_at: None,
+            topic_id: 888,
         };
 
         {
@@ -1221,29 +1187,31 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_or_create_enforces_max_instances() {
+        use crate::orchestrator::container::ContainerConfig;
+        use crate::orchestrator::instance::OpenCodeInstance;
+        use crate::types::instance::InstanceConfig;
+
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
 
-        // Create config with max 1 instance
         let config = Config {
             telegram_bot_token: "test".to_string(),
-            telegram_chat_id: -1001234567890,
+            telegram_chat_ids: vec![-1001234567890],
             telegram_allowed_users: vec![],
             handle_general_topic: true,
             opencode_path: std::path::PathBuf::from("opencode"),
-            opencode_max_instances: 1, // Only 1 allowed
+            opencode_max_instances: 1,
             opencode_idle_timeout: Duration::from_secs(300),
             opencode_port_start: 14200,
             opencode_port_pool_size: 10,
             opencode_health_check_interval: Duration::from_secs(30),
             opencode_startup_timeout: Duration::from_secs(1),
+            opencode_data_path: std::path::PathBuf::from("/tmp/opencode-data"),
             orchestrator_db_path: db_path.clone(),
             topic_db_path: temp_dir.path().join("topics.db"),
             log_db_path: temp_dir.path().join("logs.db"),
             project_base_path: temp_dir.path().to_path_buf(),
             auto_create_project_dirs: true,
-            api_port: 4200,
-            api_key: None,
             docker_image: "ghcr.io/sst/opencode".to_string(),
             opencode_config_path: std::path::PathBuf::from("/tmp/oc-config"),
             container_port: 8080,
@@ -1254,27 +1222,42 @@ mod tests {
         let port_pool = PortPool::new(14200, 10);
         let runtime = Arc::new(MockRuntime::new());
 
-        let manager = InstanceManager::new(Arc::new(config), store, port_pool, runtime)
+        let manager = InstanceManager::new(Arc::new(config), store, port_pool, runtime.clone())
             .await
             .unwrap();
 
-        // Manually add one instance to hit limit
-        let instance_config = InstanceConfig {
-            id: "existing".to_string(),
-            instance_type: InstanceType::Managed,
+        let inst_config = InstanceConfig {
+            id: "inst_test".to_string(),
             project_path: "/test/existing".to_string(),
             port: 14200,
             auto_start: true,
-            opencode_path: "/nonexistent/opencode-test-binary".to_string(),
+            opencode_path: "opencode".to_string(),
         };
-        let instance = OpenCodeInstance::external(instance_config, 14200, None).unwrap();
+        let container_config = ContainerConfig {
+            instance_id: "inst_test".to_string(),
+            image: "ghcr.io/sst/opencode".to_string(),
+            host_port: 14200,
+            container_port: 8080,
+            worktree_path: "/test/existing".to_string(),
+            config_mount_path: "/tmp/oc-config".to_string(),
+            opencode_data_path: "/tmp/opencode-data".to_string(),
+            topic_id: 100,
+            env_vars: vec![],
+        };
+        let (instance, _container_id) =
+            OpenCodeInstance::spawn(inst_config, 14200, runtime, container_config)
+                .await
+                .unwrap();
         {
             let mut instances = manager.instances.lock().await;
-            instances.insert("existing".to_string(), Arc::new(Mutex::new(instance)));
+            instances.insert(
+                "inst_test".to_string(),
+                Arc::new(tokio::sync::Mutex::new(instance)),
+            );
         }
 
-        // Try to create another should fail
-        let result = manager.get_or_create(Path::new("/test/another")).await;
+        // Second creation should fail with max instances limit
+        let result = manager.get_or_create(Path::new("/test/another"), 999).await;
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -1347,7 +1330,7 @@ mod tests {
             *create_result = Err("image not found".to_string());
         }
 
-        let result = manager.get_or_create(&project_path).await;
+        let result = manager.get_or_create(&project_path, 777).await;
 
         // Should fail because container creation is forced to error
         assert!(result.is_err());
